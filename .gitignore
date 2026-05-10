@@ -1,0 +1,43 @@
+# Unreal Engine generated folders
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+
+# IDE/editor state
+.vs/
+.idea/
+.claude/settings.local.json
+*.VC.db
+*.VC.VC.opendb
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Build products and logs
+*.log
+*.obj
+*.pdb
+*.ilk
+*.idb
+*.tlog
+*.lastbuildstate
+
+# Unreal temporary files
+*.tmp
+*.cache
+*.udebugsymbols
+__pycache__/
+*.pyc
+
+# JavaScript dependencies
+node_modules/
+
+# Local screenshots and verification artifacts
+Screenshots/
+
+# OS noise
+Thumbs.db
+Desktop.ini
+.DS_Store

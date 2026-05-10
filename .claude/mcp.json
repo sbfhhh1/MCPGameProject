@@ -1,0 +1,8 @@
+{
+  "unreal-bridge": {
+    "type": "stdio",
+    "command": "node",
+    "args": ["Scripts/unreal_mcp_bridge.js"],
+    "description": "Unreal Engine MCP 桥接服务，连接当前工程的 UE 编辑器"
+  }
+}
