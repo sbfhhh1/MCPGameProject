@@ -237,7 +237,9 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("take_screenshot") ||
                      CommandType == TEXT("rerun_construction_scripts") ||
                      CommandType == TEXT("openclaw_gn_configure_refresh") ||
-                     CommandType == TEXT("openclaw_gn_get_status"))
+                     CommandType == TEXT("openclaw_gn_get_status") ||
+                     CommandType == TEXT("openclaw_gn_dump_mesh_debug") ||
+                     CommandType == TEXT("open_level"))
             {
                 ResultJson = EditorCommands->HandleCommand(CommandType, Params);
             }

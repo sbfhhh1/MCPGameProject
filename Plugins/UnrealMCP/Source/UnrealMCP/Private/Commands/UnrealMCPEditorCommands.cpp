@@ -8,6 +8,7 @@
 #include "Engine/GameViewportClient.h"
 #include "Misc/FileHelper.h"
 #include "GameFramework/Actor.h"
+#include "FileHelpers.h"
 #include "Engine/Selection.h"
 #include "Kismet/GameplayStatics.h"
 #include "Engine/StaticMeshActor.h"
@@ -21,6 +22,9 @@
 #include "Subsystems/EditorActorSubsystem.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Misc/Paths.h"
+#include "Serialization/JsonSerializer.h"
+#include "Serialization/JsonWriter.h"
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
 {
@@ -87,7 +91,15 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     {
         return HandleOpenClawGNGetStatus(Params);
     }
-    
+    else if (CommandType == TEXT("openclaw_gn_dump_mesh_debug"))
+    {
+        return HandleOpenClawGNDumpMeshDebug(Params);
+    }
+    else if (CommandType == TEXT("open_level"))
+    {
+        return HandleOpenLevel(Params);
+    }
+
     return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown editor command: %s"), *CommandType));
 }
 
@@ -105,7 +117,7 @@ namespace
         UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
         for (AActor* Actor : AllActors)
         {
-            if (Actor && Actor->GetName() == ActorName)
+            if (Actor && (Actor->GetName() == ActorName || Actor->GetActorLabel() == ActorName))
             {
                 return Actor;
             }
@@ -208,6 +220,129 @@ namespace
             Input.Type = EBlenderGNParameterType::Float;
             Input.FloatValue = InputObject->GetNumberField(TEXT("value"));
         }
+    }
+
+    TArray<TSharedPtr<FJsonValue>> MakeFlatVectorArray(const TArray<FVector>& Values)
+    {
+        TArray<TSharedPtr<FJsonValue>> Result;
+        Result.Reserve(Values.Num() * 3);
+        for (const FVector& Value : Values)
+        {
+            Result.Add(MakeShared<FJsonValueNumber>(Value.X));
+            Result.Add(MakeShared<FJsonValueNumber>(Value.Y));
+            Result.Add(MakeShared<FJsonValueNumber>(Value.Z));
+        }
+        return Result;
+    }
+
+    TArray<TSharedPtr<FJsonValue>> MakeFlatVector2DArray(const TArray<FVector2D>& Values)
+    {
+        TArray<TSharedPtr<FJsonValue>> Result;
+        Result.Reserve(Values.Num() * 2);
+        for (const FVector2D& Value : Values)
+        {
+            Result.Add(MakeShared<FJsonValueNumber>(Value.X));
+            Result.Add(MakeShared<FJsonValueNumber>(Value.Y));
+        }
+        return Result;
+    }
+
+    TArray<TSharedPtr<FJsonValue>> MakeIntArray(const TArray<int32>& Values)
+    {
+        TArray<TSharedPtr<FJsonValue>> Result;
+        Result.Reserve(Values.Num());
+        for (const int32 Value : Values)
+        {
+            Result.Add(MakeShared<FJsonValueNumber>(Value));
+        }
+        return Result;
+    }
+
+    TArray<TSharedPtr<FJsonValue>> MakeTangentArray(const TArray<FProcMeshTangent>& Values)
+    {
+        TArray<TSharedPtr<FJsonValue>> Result;
+        Result.Reserve(Values.Num() * 4);
+        for (const FProcMeshTangent& Value : Values)
+        {
+            Result.Add(MakeShared<FJsonValueNumber>(Value.TangentX.X));
+            Result.Add(MakeShared<FJsonValueNumber>(Value.TangentX.Y));
+            Result.Add(MakeShared<FJsonValueNumber>(Value.TangentX.Z));
+            Result.Add(MakeShared<FJsonValueBoolean>(Value.bFlipTangentY));
+        }
+        return Result;
+    }
+
+    TSharedPtr<FJsonObject> BuildOpenClawGNMeshStats(const FBlenderGNMeshData& MeshData)
+    {
+        const bool bHasImportedNormals = MeshData.bImportedNormals && MeshData.Normals.Num() == MeshData.Vertices.Num();
+        int32 InvalidTriangles = 0;
+        int32 DegenerateTriangles = 0;
+        int32 ComparedTriangles = 0;
+        int32 NegativeDotTriangles = 0;
+        int32 LowDotTriangles = 0;
+        double MinDot = 1.0;
+        double MaxDot = -1.0;
+        double SumDot = 0.0;
+
+        for (int32 Index = 0; Index + 2 < MeshData.Triangles.Num(); Index += 3)
+        {
+            const int32 A = MeshData.Triangles[Index];
+            const int32 B = MeshData.Triangles[Index + 1];
+            const int32 C = MeshData.Triangles[Index + 2];
+            if (!MeshData.Vertices.IsValidIndex(A) || !MeshData.Vertices.IsValidIndex(B) || !MeshData.Vertices.IsValidIndex(C))
+            {
+                ++InvalidTriangles;
+                continue;
+            }
+
+            const FVector FaceNormal = FVector::CrossProduct(MeshData.Vertices[B] - MeshData.Vertices[A], MeshData.Vertices[C] - MeshData.Vertices[A]).GetSafeNormal();
+            if (FaceNormal.IsNearlyZero())
+            {
+                ++DegenerateTriangles;
+                continue;
+            }
+            if (!bHasImportedNormals)
+            {
+                continue;
+            }
+
+            const FVector ImportedNormal = (MeshData.Normals[A] + MeshData.Normals[B] + MeshData.Normals[C]).GetSafeNormal();
+            if (ImportedNormal.IsNearlyZero())
+            {
+                continue;
+            }
+
+            const double Dot = FVector::DotProduct(FaceNormal, ImportedNormal);
+            MinDot = FMath::Min(MinDot, Dot);
+            MaxDot = FMath::Max(MaxDot, Dot);
+            SumDot += Dot;
+            ++ComparedTriangles;
+            if (Dot < 0.0)
+            {
+                ++NegativeDotTriangles;
+            }
+            if (Dot < 0.2)
+            {
+                ++LowDotTriangles;
+            }
+        }
+
+        TSharedPtr<FJsonObject> Stats = MakeShared<FJsonObject>();
+        Stats->SetNumberField(TEXT("vertices"), MeshData.Vertices.Num());
+        Stats->SetNumberField(TEXT("triangles"), MeshData.Triangles.Num() / 3);
+        Stats->SetNumberField(TEXT("normals"), MeshData.Normals.Num());
+        Stats->SetNumberField(TEXT("uvs"), MeshData.UVs.Num());
+        Stats->SetNumberField(TEXT("sections"), MeshData.Sections.Num());
+        Stats->SetBoolField(TEXT("has_imported_normals"), bHasImportedNormals);
+        Stats->SetNumberField(TEXT("invalid_triangles"), InvalidTriangles);
+        Stats->SetNumberField(TEXT("degenerate_triangles"), DegenerateTriangles);
+        Stats->SetNumberField(TEXT("compared_normal_triangles"), ComparedTriangles);
+        Stats->SetNumberField(TEXT("negative_dot_triangles"), NegativeDotTriangles);
+        Stats->SetNumberField(TEXT("low_dot_triangles"), LowDotTriangles);
+        Stats->SetNumberField(TEXT("min_face_imported_dot"), ComparedTriangles > 0 ? MinDot : 0.0);
+        Stats->SetNumberField(TEXT("max_face_imported_dot"), ComparedTriangles > 0 ? MaxDot : 0.0);
+        Stats->SetNumberField(TEXT("average_face_imported_dot"), ComparedTriangles > 0 ? SumDot / ComparedTriangles : 0.0);
+        return Stats;
     }
 }
 
@@ -312,7 +447,6 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnActor(const TShared
     }
 
     FActorSpawnParameters SpawnParams;
-    SpawnParams.Name = *ActorName;
 
     if (ActorType == TEXT("StaticMeshActor"))
     {
@@ -371,6 +505,8 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnActor(const TShared
 
     if (NewActor)
     {
+        NewActor->SetActorLabel(*ActorName);
+
         // Set scale (since SpawnActor only takes location and rotation)
         FTransform Transform = NewActor->GetTransform();
         Transform.SetScale3D(Scale);
@@ -631,11 +767,11 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnBlueprintActor(cons
     SpawnTransform.SetScale3D(Scale);
 
     FActorSpawnParameters SpawnParams;
-    SpawnParams.Name = *ActorName;
 
     AActor* NewActor = World->SpawnActor<AActor>(Blueprint->GeneratedClass, SpawnTransform, SpawnParams);
     if (NewActor)
     {
+        NewActor->SetActorLabel(*ActorName);
         return FUnrealMCPCommonUtils::ActorToJsonObject(NewActor, true);
     }
 
@@ -868,6 +1004,85 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenClawGNConfigureRefre
     {
         Component->BlenderTimeoutSeconds = FMath::Clamp(static_cast<int32>(Params->GetNumberField(TEXT("timeout_seconds"))), 1, 120);
     }
+    if (Params->HasField(TEXT("refresh_mode")))
+    {
+        const TSharedPtr<FJsonValue> RefreshModeValue = Params->Values.FindRef(TEXT("refresh_mode"));
+        if (RefreshModeValue.IsValid() && RefreshModeValue->Type == EJson::String)
+        {
+            const FString RefreshModeString = RefreshModeValue->AsString();
+            if (RefreshModeString.Equals(TEXT("manual"), ESearchCase::IgnoreCase))
+            {
+                Component->RefreshMode = EBlenderGNRefreshMode::Manual;
+            }
+            else if (RefreshModeString.Equals(TEXT("on_parameter_change"), ESearchCase::IgnoreCase) ||
+                     RefreshModeString.Equals(TEXT("onparameterchange"), ESearchCase::IgnoreCase))
+            {
+                Component->RefreshMode = EBlenderGNRefreshMode::OnParameterChange;
+            }
+            else if (RefreshModeString.Equals(TEXT("fixed_interval"), ESearchCase::IgnoreCase) ||
+                     RefreshModeString.Equals(TEXT("fixedinterval"), ESearchCase::IgnoreCase))
+            {
+                Component->RefreshMode = EBlenderGNRefreshMode::FixedInterval;
+            }
+        }
+        else if (RefreshModeValue.IsValid() && RefreshModeValue->Type == EJson::Number)
+        {
+            const int32 RefreshModeInt = FMath::Clamp(static_cast<int32>(RefreshModeValue->AsNumber()), 0, 2);
+            Component->RefreshMode = static_cast<EBlenderGNRefreshMode>(RefreshModeInt);
+        }
+    }
+    if (Params->HasField(TEXT("fixed_refresh_interval")))
+    {
+        Component->FixedRefreshInterval = FMath::Clamp(static_cast<float>(Params->GetNumberField(TEXT("fixed_refresh_interval"))), 0.1f, 10.0f);
+    }
+    if (Params->HasField(TEXT("minimum_refresh_interval")))
+    {
+        Component->MinimumRefreshInterval = FMath::Clamp(static_cast<float>(Params->GetNumberField(TEXT("minimum_refresh_interval"))), 0.02f, 2.0f);
+    }
+    if (Params->HasField(TEXT("blender_frame_rate")))
+    {
+        Component->BlenderFrameRate = FMath::Clamp(static_cast<float>(Params->GetNumberField(TEXT("blender_frame_rate"))), 1.0f, 60.0f);
+    }
+    if (Params->HasField(TEXT("apply_imported_normals")))
+    {
+        Component->bApplyImportedNormals = Params->GetBoolField(TEXT("apply_imported_normals"));
+    }
+    if (Params->HasField(TEXT("smooth_normals_by_position")))
+    {
+        Component->bSmoothNormalsByPosition = Params->GetBoolField(TEXT("smooth_normals_by_position"));
+    }
+    if (Params->HasField(TEXT("normal_smooth_quantization")))
+    {
+        Component->NormalSmoothQuantization = FMath::Clamp(static_cast<float>(Params->GetNumberField(TEXT("normal_smooth_quantization"))), 1000.0f, 100000.0f);
+    }
+    if (Params->HasField(TEXT("cast_shadows")))
+    {
+        Component->bCastShadows = Params->GetBoolField(TEXT("cast_shadows"));
+    }
+    if (Params->HasField(TEXT("force_default_material")))
+    {
+        Component->bForceDefaultMaterial = Params->GetBoolField(TEXT("force_default_material"));
+    }
+    if (Params->HasField(TEXT("invert_shading_normals")))
+    {
+        Component->bInvertShadingNormals = Params->GetBoolField(TEXT("invert_shading_normals"));
+    }
+    if (Params->HasField(TEXT("use_binary_mesh_cache")))
+    {
+        Component->bUseBinaryMeshCache = Params->GetBoolField(TEXT("use_binary_mesh_cache"));
+    }
+    if (Params->HasField(TEXT("enable_preview_animation")))
+    {
+        Component->bEnablePreviewAnimation = Params->GetBoolField(TEXT("enable_preview_animation"));
+    }
+    if (Params->HasField(TEXT("preview_animation_frame_rate")))
+    {
+        Component->PreviewAnimationFrameRate = FMath::Clamp(static_cast<float>(Params->GetNumberField(TEXT("preview_animation_frame_rate"))), 1.0f, 120.0f);
+    }
+    if (Params->HasField(TEXT("preview_animation_smoothness")))
+    {
+        Component->PreviewAnimationSmoothness = FMath::Clamp(static_cast<float>(Params->GetNumberField(TEXT("preview_animation_smoothness"))), 0.0f, 1.0f);
+    }
 
     const TArray<TSharedPtr<FJsonValue>>* InputValues = nullptr;
     if (Params->TryGetArrayField(TEXT("inputs"), InputValues) && InputValues)
@@ -896,6 +1111,14 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenClawGNConfigureRefre
     ResultObj->SetStringField(TEXT("object_name"), Component->ObjectName);
     ResultObj->SetStringField(TEXT("modifier_name"), Component->ModifierName);
     ResultObj->SetStringField(TEXT("blend_file"), Component->BlendFile.FilePath);
+    ResultObj->SetNumberField(TEXT("refresh_mode"), static_cast<uint8>(Component->RefreshMode));
+    ResultObj->SetBoolField(TEXT("apply_imported_normals"), Component->bApplyImportedNormals);
+    ResultObj->SetBoolField(TEXT("smooth_normals_by_position"), Component->bSmoothNormalsByPosition);
+    ResultObj->SetBoolField(TEXT("cast_shadows"), Component->bCastShadows);
+    ResultObj->SetBoolField(TEXT("force_default_material"), Component->bForceDefaultMaterial);
+    ResultObj->SetBoolField(TEXT("invert_shading_normals"), Component->bInvertShadingNormals);
+    ResultObj->SetBoolField(TEXT("enable_preview_animation"), Component->bEnablePreviewAnimation);
+    ResultObj->SetNumberField(TEXT("preview_animation_frame_rate"), Component->PreviewAnimationFrameRate);
     return ResultObj;
 }
 
@@ -931,5 +1154,131 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenClawGNGetStatus(cons
     ResultObj->SetStringField(TEXT("object_name"), Component->ObjectName);
     ResultObj->SetStringField(TEXT("modifier_name"), Component->ModifierName);
     ResultObj->SetStringField(TEXT("blend_file"), Component->BlendFile.FilePath);
+    ResultObj->SetNumberField(TEXT("refresh_mode"), static_cast<uint8>(Component->RefreshMode));
+    ResultObj->SetNumberField(TEXT("fixed_refresh_interval"), Component->FixedRefreshInterval);
+    ResultObj->SetBoolField(TEXT("apply_imported_normals"), Component->bApplyImportedNormals);
+    ResultObj->SetBoolField(TEXT("smooth_normals_by_position"), Component->bSmoothNormalsByPosition);
+    ResultObj->SetBoolField(TEXT("mesh_has_imported_normals"), Component->GetLastMeshData().bImportedNormals);
+    ResultObj->SetBoolField(TEXT("cast_shadows"), Component->bCastShadows);
+    ResultObj->SetBoolField(TEXT("force_default_material"), Component->bForceDefaultMaterial);
+    ResultObj->SetBoolField(TEXT("invert_shading_normals"), Component->bInvertShadingNormals);
+    ResultObj->SetBoolField(TEXT("enable_preview_animation"), Component->bEnablePreviewAnimation);
+    ResultObj->SetNumberField(TEXT("preview_animation_frame_rate"), Component->PreviewAnimationFrameRate);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenClawGNDumpMeshDebug(const TSharedPtr<FJsonObject>& Params)
+{
+    FString ActorName;
+    if (!Params->TryGetStringField(TEXT("actor_name"), ActorName) && !Params->TryGetStringField(TEXT("name"), ActorName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'actor_name' parameter"));
+    }
+
+    AActor* Actor = FindActorByExactName(ActorName);
+    if (!Actor)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor not found: %s"), *ActorName));
+    }
+
+    UBlenderGeometryNodesComponent* Component = Actor->FindComponentByClass<UBlenderGeometryNodesComponent>();
+    if (!Component)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Actor has no UBlenderGeometryNodesComponent: %s"), *ActorName));
+    }
+
+    const FBlenderGNMeshData& MeshData = Component->GetLastMeshData();
+    const TArray<FProcMeshTangent>& Tangents = Component->GetLastTangents();
+    FString OutputPath;
+    Params->TryGetStringField(TEXT("output_path"), OutputPath);
+    const bool bWriteFullDump = !OutputPath.IsEmpty();
+    const bool bIncludeArrays = bWriteFullDump || (Params->HasField(TEXT("include_arrays")) && Params->GetBoolField(TEXT("include_arrays")));
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("actor"), ActorName);
+    ResultObj->SetStringField(TEXT("object_name"), Component->ObjectName);
+    ResultObj->SetStringField(TEXT("modifier_name"), Component->ModifierName);
+    ResultObj->SetStringField(TEXT("blend_file"), Component->BlendFile.FilePath);
+    ResultObj->SetStringField(TEXT("status"), Component->LastStatus);
+    ResultObj->SetBoolField(TEXT("apply_imported_normals"), Component->bApplyImportedNormals);
+    ResultObj->SetBoolField(TEXT("smooth_normals_by_position"), Component->bSmoothNormalsByPosition);
+    ResultObj->SetBoolField(TEXT("cast_shadows"), Component->bCastShadows);
+    ResultObj->SetBoolField(TEXT("force_default_material"), Component->bForceDefaultMaterial);
+    ResultObj->SetBoolField(TEXT("invert_shading_normals"), Component->bInvertShadingNormals);
+    ResultObj->SetObjectField(TEXT("mesh_stats"), BuildOpenClawGNMeshStats(MeshData));
+    ResultObj->SetNumberField(TEXT("tangents"), Tangents.Num());
+
+    TArray<TSharedPtr<FJsonValue>> SectionArray;
+    SectionArray.Reserve(MeshData.Sections.Num());
+    for (int32 SectionIndex = 0; SectionIndex < MeshData.Sections.Num(); ++SectionIndex)
+    {
+        TSharedPtr<FJsonObject> SectionObj = MakeShared<FJsonObject>();
+        SectionObj->SetNumberField(TEXT("section_index"), SectionIndex);
+        SectionObj->SetNumberField(TEXT("triangles"), MeshData.Sections[SectionIndex].Triangles.Num() / 3);
+        if (MeshData.Materials.IsValidIndex(SectionIndex))
+        {
+            SectionObj->SetStringField(TEXT("material_name"), MeshData.Materials[SectionIndex].Name);
+        }
+        if (bIncludeArrays)
+        {
+            SectionObj->SetArrayField(TEXT("triangle_indices"), MakeIntArray(MeshData.Sections[SectionIndex].Triangles));
+        }
+        SectionArray.Add(MakeShared<FJsonValueObject>(SectionObj));
+    }
+    ResultObj->SetArrayField(TEXT("sections"), SectionArray);
+
+    if (bIncludeArrays)
+    {
+        ResultObj->SetArrayField(TEXT("vertices"), MakeFlatVectorArray(MeshData.Vertices));
+        ResultObj->SetArrayField(TEXT("normals"), MakeFlatVectorArray(MeshData.Normals));
+        ResultObj->SetArrayField(TEXT("uvs"), MakeFlatVector2DArray(MeshData.UVs));
+        ResultObj->SetArrayField(TEXT("triangles"), MakeIntArray(MeshData.Triangles));
+        ResultObj->SetArrayField(TEXT("material_indices"), MakeIntArray(MeshData.MaterialIndices));
+        ResultObj->SetArrayField(TEXT("tangent_x_and_flip_y"), MakeTangentArray(Tangents));
+    }
+
+    if (bWriteFullDump)
+    {
+        FString OutputJson;
+        const TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&OutputJson);
+        FJsonSerializer::Serialize(ResultObj.ToSharedRef(), Writer);
+        if (!FFileHelper::SaveStringToFile(OutputJson, *OutputPath))
+        {
+            return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to write GN mesh debug dump: %s"), *OutputPath));
+        }
+        ResultObj->SetStringField(TEXT("output_path"), FPaths::ConvertRelativePathToFull(OutputPath));
+    }
+
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenLevel(const TSharedPtr<FJsonObject>& Params)
+{
+    FString LevelPath;
+    if (!Params->TryGetStringField(TEXT("path"), LevelPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'path' parameter"));
+    }
+
+    if (!FPackageName::DoesPackageExist(LevelPath))
+    {
+        const FString ContentRelative = FString::Printf(TEXT("/Game/%s"), *LevelPath);
+        if (FPackageName::DoesPackageExist(ContentRelative))
+        {
+            LevelPath = ContentRelative;
+        }
+    }
+
+    bool bSuccess = FEditorFileUtils::LoadMap(LevelPath, false, true);
+    if (!bSuccess)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Failed to open level: %s"), *LevelPath));
+    }
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShareable(new FJsonObject);
+    ResultObj->SetStringField(TEXT("status"), TEXT("success"));
+    TSharedPtr<FJsonObject> ResultData = MakeShareable(new FJsonObject);
+    ResultData->SetStringField(TEXT("level"), LevelPath);
+    ResultObj->SetObjectField(TEXT("result"), ResultData);
     return ResultObj;
 }

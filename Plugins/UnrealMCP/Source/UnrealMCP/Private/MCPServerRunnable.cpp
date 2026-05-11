@@ -11,9 +11,6 @@
 #include "Misc/ScopeLock.h"
 #include "HAL/PlatformTime.h"
 
-// Buffer size for receiving data
-const int32 MCPServerBufferSize = 8192;
-
 FMCPServerRunnable::FMCPServerRunnable(UUnrealMCPBridge* InBridge, TSharedPtr<FSocket> InListenerSocket)
     : Bridge(InBridge)
     , ListenerSocket(InListenerSocket)
@@ -56,11 +53,11 @@ uint32 FMCPServerRunnable::Run()
                 ClientSocket->SetSendBufferSize(SocketBufferSize, SocketBufferSize);
                 ClientSocket->SetReceiveBufferSize(SocketBufferSize, SocketBufferSize);
                 
-                uint8 Buffer[MCPServerBufferSize];
+                uint8 Buffer[8192];
                 while (bRunning)
                 {
                     int32 BytesRead = 0;
-                    if (ClientSocket->Recv(Buffer, MCPServerBufferSize - 1, BytesRead))
+                    if (ClientSocket->Recv(Buffer, sizeof(Buffer), BytesRead))
                     {
                         if (BytesRead == 0)
                         {
@@ -91,7 +88,8 @@ uint32 FMCPServerRunnable::Run()
                                 
                                 // Send response
                                 int32 BytesSent = 0;
-                                if (!ClientSocket->Send((uint8*)TCHAR_TO_UTF8(*Response), Response.Len(), BytesSent))
+                                auto ResponseUtf8 = StringCast<ANSICHAR>(*Response);
+                                if (!ClientSocket->Send((const uint8*)ResponseUtf8.Get(), ResponseUtf8.Length(), BytesSent))
                                 {
                                     UE_LOG(LogTemp, Warning, TEXT("MCPServerRunnable: Failed to send response"));
                                 }
@@ -314,7 +312,8 @@ void FMCPServerRunnable::ProcessMessage(TSharedPtr<FSocket> Client, const FStrin
     
     UE_LOG(LogTemp, Display, TEXT("MCPServerRunnable: Sending response: %s"), *Response);
     
-    if (!Client->Send((uint8*)TCHAR_TO_UTF8(*Response), Response.Len(), BytesSent))
+    auto ResponseUtf8 = StringCast<ANSICHAR>(*Response);
+    if (!Client->Send((const uint8*)ResponseUtf8.Get(), ResponseUtf8.Length(), BytesSent))
     {
         UE_LOG(LogTemp, Error, TEXT("MCPServerRunnable: Failed to send response"));
     }
