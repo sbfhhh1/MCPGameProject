@@ -36,6 +36,7 @@ node_modules/
 
 # Local screenshots and verification artifacts
 Screenshots/
+*.png
 
 # OS noise
 Thumbs.db
