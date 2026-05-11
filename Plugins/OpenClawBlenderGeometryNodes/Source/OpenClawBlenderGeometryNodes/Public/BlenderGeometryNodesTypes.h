@@ -104,6 +104,9 @@ struct OPENCLAWBLENDERGEOMETRYNODES_API FBlenderGNMeshData
 	TArray<FVector> Normals;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Mesh")
+	bool bImportedNormals = false;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Mesh")
 	TArray<FVector2D> UVs;
 
 	UPROPERTY(BlueprintReadOnly, Category = "Mesh")

@@ -23,7 +23,9 @@ public class OpenClawBlenderGeometryNodes : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new[]
 		{
 			"Slate",
-			"SlateCore"
+			"SlateCore",
+			"RHI",
+			"RenderCore"
 		});
 	}
 }

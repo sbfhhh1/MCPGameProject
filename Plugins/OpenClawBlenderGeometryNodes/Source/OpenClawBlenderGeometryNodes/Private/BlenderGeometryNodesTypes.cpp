@@ -82,6 +82,7 @@ void FBlenderGNMeshData::Reset()
 	ObjectName.Reset();
 	Vertices.Reset();
 	Normals.Reset();
+	bImportedNormals = false;
 	UVs.Reset();
 	Triangles.Reset();
 	MaterialIndices.Reset();

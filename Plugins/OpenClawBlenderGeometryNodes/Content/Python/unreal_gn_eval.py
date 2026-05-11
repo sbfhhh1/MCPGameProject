@@ -5,45 +5,34 @@ from array import array
 from pathlib import Path
 
 import bpy
-import bmesh
 
 
 def log(message):
-    print("[OpenClawGN] " + message, flush=True)
+    print("[UnityGN] " + message, flush=True)
 
 
 def load_request():
     if "--" not in sys.argv:
         raise RuntimeError("Missing request json path after --")
-
     request_path = Path(sys.argv[sys.argv.index("--") + 1])
     with request_path.open("r", encoding="utf-8-sig") as handle:
-        request = json.load(handle)
-
-    if not request.get("outputPath"):
-        raise RuntimeError("Request is missing required outputPath")
-    return request
+        return json.load(handle)
 
 
 def find_modifier(obj, modifier_name):
     if modifier_name:
         modifier = obj.modifiers.get(modifier_name)
         if modifier is not None:
-            if modifier.type != "NODES":
-                raise RuntimeError(f"Modifier '{modifier_name}' on object '{obj.name}' is not a Geometry Nodes modifier")
             return modifier
-
     for modifier in obj.modifiers:
         if modifier.type == "NODES":
             return modifier
-
     raise RuntimeError(f"No Geometry Nodes modifier found on object '{obj.name}'")
 
 
 def interface_identifier_by_name(node_group, socket_name):
     if not node_group or not socket_name:
         return None
-
     for item in node_group.interface.items_tree:
         if (
             getattr(item, "item_type", None) == "SOCKET"
@@ -51,68 +40,53 @@ def interface_identifier_by_name(node_group, socket_name):
             and getattr(item, "name", None) == socket_name
         ):
             return getattr(item, "identifier", None)
-
     return None
+
+
+def has_interface_inputs(node_group):
+    if not node_group:
+        return False
+    for item in node_group.interface.items_tree:
+        if getattr(item, "item_type", None) == "SOCKET" and getattr(item, "in_out", None) == "INPUT":
+            return True
+    return False
 
 
 def group_input_socket_identifier_by_name(node_group, socket_name):
     if not node_group or not socket_name:
         return None
-
     for node in node_group.nodes:
         if node.bl_idname != "NodeGroupInput":
             continue
         for output in node.outputs:
             if output.name == socket_name:
                 return getattr(output, "identifier", None)
-
     return None
-
-
-def node_group_input_sockets_by_name(node_group, socket_name):
-    if not node_group or not socket_name:
-        return []
-
-    sockets = []
-    for node in node_group.nodes:
-        if node.bl_idname != "NodeGroupInput":
-            continue
-        for output in node.outputs:
-            if output.name == socket_name:
-                sockets.append(output)
-    return sockets
 
 
 def set_modifier_input(modifier, node_group, item):
     socket_name = item.get("name", "")
     fallback = item.get("fallbackIdentifier", "")
-    explicit_identifier = item.get("identifier", "")
     value = item.get("value")
     existing_keys = set(modifier.keys())
 
     candidates = [
         fallback,
-        explicit_identifier,
         interface_identifier_by_name(node_group, socket_name),
         group_input_socket_identifier_by_name(node_group, socket_name),
-        socket_name,
     ]
 
-    seen = set()
     for key in candidates:
-        if not key or key in seen:
-            continue
-        seen.add(key)
-        if key not in existing_keys:
+        if not key or key not in existing_keys:
             continue
         try:
             modifier[key] = value
-            log(f"Set {socket_name or key} via modifier key {key} = {value}")
+            log(f"Set {socket_name or key} via {key} = {value}")
             return True
-        except Exception as exc:
-            log(f"Warning: failed setting modifier key '{key}' for '{socket_name}': {exc}")
+        except Exception:
+            pass
 
-    log(f"Warning: could not set GN input '{socket_name}' on modifier '{modifier.name}'")
+    log(f"Warning: could not set GN input '{socket_name}'")
     return False
 
 
@@ -157,12 +131,17 @@ def try_apply_linked_group_input_override(node_group, item):
         return False
 
     changed = False
-    for output in node_group_input_sockets_by_name(node_group, socket_name):
-        for link in list(output.links):
-            target_socket = link.to_socket
-            if set_socket_default_value(target_socket, item.get("value")):
-                node_group.links.remove(link)
-                changed = True
+    for node in node_group.nodes:
+        if node.bl_idname != "NodeGroupInput":
+            continue
+        for output in node.outputs:
+            if output.name != socket_name:
+                continue
+            for link in list(output.links):
+                target_socket = link.to_socket
+                if set_socket_default_value(target_socket, item.get("value")):
+                    node_group.links.remove(link)
+                    changed = True
 
     if changed:
         log(f"Set {socket_name} by overriding linked node sockets = {item.get('value')}")
@@ -200,6 +179,9 @@ def try_apply_builtin_node_override(node_group, item):
         socket = node.inputs.get("Subdivisions")
         if socket is None:
             continue
+        # Blender 5.1 accepts a linked group input here but does not reliably
+        # invalidate topology through the modifier socket. For runtime sidecar
+        # evaluation, setting the node socket directly gives the expected mesh.
         remove_links_to_socket(node_group, socket)
         socket.default_value = value
         changed = True
@@ -207,16 +189,6 @@ def try_apply_builtin_node_override(node_group, item):
     if changed:
         log(f"Set Hex Subdivisions by overriding Ico Sphere node sockets = {value}")
     return changed
-
-
-def write_numeric_array(handle, typecode, values):
-    if not values:
-        return
-
-    packed = array(typecode, values)
-    if sys.byteorder != "little":
-        packed.byteswap()
-    packed.tofile(handle)
 
 
 def write_binary_mesh_cache(output_path, object_name, vertices, normals, uvs, triangles, material_indices, material_names):
@@ -241,37 +213,14 @@ def write_binary_mesh_cache(output_path, object_name, vertices, normals, uvs, tr
             handle.write(encoded)
 
 
-def socket_float(node, name, fallback):
-    socket = node.inputs.get(name) if node else None
-    if socket is not None and hasattr(socket, "default_value"):
-        try:
-            return float(socket.default_value)
-        except Exception:
-            return fallback
-    return fallback
+def write_numeric_array(handle, typecode, values):
+    if not values:
+        return
 
-
-def socket_color(node, name, fallback):
-    socket = node.inputs.get(name) if node else None
-    if socket is not None and hasattr(socket, "default_value"):
-        value = socket.default_value
-        try:
-            if hasattr(value, "__len__") and len(value) >= 3:
-                alpha = float(value[3]) if len(value) > 3 else fallback[3]
-                return [float(value[0]), float(value[1]), float(value[2]), alpha]
-        except Exception:
-            return fallback
-    return fallback
-
-
-def find_principled_bsdf(material):
-    if not material or not material.use_nodes or not material.node_tree:
-        return None
-
-    for node in material.node_tree.nodes:
-        if node.bl_idname == "ShaderNodeBsdfPrincipled":
-            return node
-    return None
+    packed = array(typecode, values)
+    if sys.byteorder != "little":
+        packed.byteswap()
+    packed.tofile(handle)
 
 
 def material_metadata(mesh):
@@ -281,33 +230,32 @@ def material_metadata(mesh):
     roughness = []
     for material in mesh.materials:
         names.append(material.name if material else "")
-        color = [0.72, 0.72, 0.68, 1.0]
-        diffuse = getattr(material, "diffuse_color", None) if material else None
-        if diffuse is not None:
-            color = [float(diffuse[0]), float(diffuse[1]), float(diffuse[2]), float(diffuse[3])]
-
-        principled = find_principled_bsdf(material)
+        color = getattr(material, "diffuse_color", None) if material else None
+        if color is not None:
+            colors.extend([float(color[0]), float(color[1]), float(color[2]), float(color[3])])
+        else:
+            colors.extend([0.72, 0.72, 0.68, 1.0])
+        principled = None
+        if material and material.use_nodes and material.node_tree:
+            for node in material.node_tree.nodes:
+                if node.bl_idname == "ShaderNodeBsdfPrincipled":
+                    principled = node
+                    break
+        metallic_value = 0.0
+        roughness_value = 0.45
         if principled:
-            color = socket_color(principled, "Base Color", color)
-        colors.extend(color)
-        metallic.append(socket_float(principled, "Metallic", 0.0))
-        roughness.append(socket_float(principled, "Roughness", 0.45))
+            metal_socket = principled.inputs.get("Metallic")
+            rough_socket = principled.inputs.get("Roughness")
+            if metal_socket and hasattr(metal_socket, "default_value"):
+                metallic_value = float(metal_socket.default_value)
+            if rough_socket and hasattr(rough_socket, "default_value"):
+                roughness_value = float(rough_socket.default_value)
+        metallic.append(metallic_value)
+        roughness.append(roughness_value)
     return names, colors, metallic, roughness
 
 
-def write_json_mesh_cache(
-    output_path,
-    object_name,
-    vertices,
-    normals,
-    uvs,
-    triangles,
-    material_indices,
-    material_names,
-    material_colors,
-    material_metallic,
-    material_roughness,
-):
+def write_json_mesh_cache(output_path, object_name, vertices, normals, uvs, triangles, material_indices, material_names, material_colors, material_metallic, material_roughness):
     data = {
         "objectName": object_name,
         "vertices": vertices,
@@ -359,43 +307,13 @@ def mesh_bounds(mesh):
 
 
 def loop_uv(mesh, loop_index, co, normal, bounds_min, bounds_size):
-    if mesh.uv_layers.active and loop_index < len(mesh.uv_layers.active.data):
-        uv = mesh.uv_layers.active.data[loop_index].uv
+    active_uv = mesh.uv_layers.active
+    if active_uv and loop_index < len(active_uv.data):
+        uv = active_uv.data[loop_index].uv
         return (float(uv.x), float(uv.y))
     if bounds_min is not None:
         return cube_project_uv(co, normal, bounds_min, bounds_size)
     return (0.0, 0.0)
-
-
-def repair_evaluated_mesh_normals(mesh):
-    """Apply a Blender-side normal fix before serializing for Unreal."""
-    if not mesh or not mesh.polygons:
-        return
-
-    try:
-        mesh.validate(clean_customdata=False)
-    except Exception as exc:
-        log(f"Warning: mesh validation before normal repair failed: {exc}")
-
-    bm = bmesh.new()
-    try:
-        bm.from_mesh(mesh)
-        bm.normal_update()
-        bmesh.ops.recalc_face_normals(bm, faces=list(bm.faces))
-        bm.to_mesh(mesh)
-    finally:
-        bm.free()
-
-    # Custom split normals from a GN graph can keep stale or inverted loop normals.
-    # Zero custom loop normals asks Blender to use the repaired face/loop normals.
-    if hasattr(mesh, "normals_split_custom_set") and mesh.loops:
-        try:
-            mesh.normals_split_custom_set([(0.0, 0.0, 0.0)] * len(mesh.loops))
-        except Exception as exc:
-            log(f"Warning: clearing custom split normals failed: {exc}")
-
-    mesh.update(calc_edges=True)
-    mesh.calc_loop_triangles()
 
 
 def evaluated_mesh_to_cache(obj, output_path, mesh_format):
@@ -403,7 +321,7 @@ def evaluated_mesh_to_cache(obj, output_path, mesh_format):
     evaluated = obj.evaluated_get(depsgraph)
     mesh = evaluated.to_mesh(preserve_all_data_layers=True, depsgraph=depsgraph)
     try:
-        repair_evaluated_mesh_normals(mesh)
+        mesh.calc_loop_triangles()
         vertices = []
         normals = []
         uvs = []
@@ -416,7 +334,7 @@ def evaluated_mesh_to_cache(obj, output_path, mesh_format):
                 vertex = mesh.vertices[vertex_index]
                 loop = mesh.loops[loop_index]
                 co = vertex.co
-                no = loop.normal
+                no = loop.normal.copy()
                 vertices.extend([co.x, co.y, co.z])
                 normals.extend([no.x, no.y, no.z])
                 uv = loop_uv(mesh, loop_index, co, no, bounds_min, bounds_size)
@@ -430,42 +348,11 @@ def evaluated_mesh_to_cache(obj, output_path, mesh_format):
         if mesh_format == "binary":
             write_binary_mesh_cache(output_path, obj.name, vertices, normals, uvs, triangles, material_indices, material_names)
         else:
-            write_json_mesh_cache(
-                output_path,
-                obj.name,
-                vertices,
-                normals,
-                uvs,
-                triangles,
-                material_indices,
-                material_names,
-                material_colors,
-                material_metallic,
-                material_roughness,
-            )
-        log(f"Exported {len(vertices) // 3} split vertices, {len(mesh.loop_triangles)} triangles to {output_path}")
+            write_json_mesh_cache(output_path, obj.name, vertices, normals, uvs, triangles, material_indices, material_names, material_colors, material_metallic, material_roughness)
+        uv_source = "active UVs" if mesh.uv_layers.active else "cube fallback UVs"
+        log(f"Exported {len(vertices) // 3} split vertices, {len(mesh.loop_triangles)} triangles, and {uv_source} to {output_path}")
     finally:
         evaluated.to_mesh_clear()
-
-
-def apply_inputs(modifier, node_group, inputs):
-    for item in inputs:
-        if not isinstance(item, dict):
-            log(f"Warning: skipped malformed input item {item}")
-            continue
-
-        if not try_apply_builtin_node_override(node_group, item):
-            if not try_apply_linked_group_input_override(node_group, item):
-                set_modifier_input(modifier, node_group, item)
-
-
-def set_scene_frame(request):
-    frame_rate = float(request.get("frameRate", bpy.context.scene.render.fps))
-    unity_time = float(request.get("unityTime", max(0.0, bpy.context.scene.frame_current / max(1.0, frame_rate))))
-    bpy.context.scene.render.fps = max(1, int(round(frame_rate)))
-    frame = int(request.get("frame", 1 + round(unity_time * frame_rate)))
-    bpy.context.scene.frame_set(max(1, frame))
-    log(f"Animation time = {unity_time:.3f}s, frame = {max(1, frame)}, fps = {bpy.context.scene.render.fps}")
 
 
 def main():
@@ -478,15 +365,22 @@ def main():
 
     modifier = find_modifier(obj, request.get("modifierName", ""))
     node_group = modifier.node_group
-    if node_group is None:
-        raise RuntimeError(f"Geometry Nodes modifier '{modifier.name}' has no node group")
 
-    apply_inputs(modifier, node_group, request.get("inputs", []))
+    for item in request.get("inputs", []):
+        if not try_apply_builtin_node_override(node_group, item):
+            if not try_apply_linked_group_input_override(node_group, item):
+                set_modifier_input(modifier, node_group, item)
 
     obj.update_tag()
     modifier.id_data.update_tag()
-    node_group.update_tag()
-    set_scene_frame(request)
+    if node_group is not None:
+        node_group.update_tag()
+    frame_rate = float(request.get("frameRate", bpy.context.scene.render.fps))
+    unity_time = float(request.get("unityTime", max(0.0, bpy.context.scene.frame_current / max(1.0, frame_rate))))
+    bpy.context.scene.render.fps = max(1, int(round(frame_rate)))
+    frame = int(request.get("frame", 1 + round(unity_time * frame_rate)))
+    bpy.context.scene.frame_set(max(1, frame))
+    log(f"Unity animation time = {unity_time:.3f}s, frame = {max(1, frame)}, fps = {bpy.context.scene.render.fps}")
     bpy.context.view_layer.update()
     evaluated_mesh_to_cache(obj, request["outputPath"], request.get("meshFormat", "json"))
 

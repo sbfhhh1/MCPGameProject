@@ -6,11 +6,11 @@
 #include "HAL/FileManager.h"
 #include "Interfaces/IPluginManager.h"
 #include "JsonObjectConverter.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInterface.h"
 #include "Misc/FileHelper.h"
 #include "Misc/Paths.h"
 #include "ProceduralMeshComponent.h"
-#include "KismetProceduralMeshLibrary.h"
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
@@ -53,6 +53,33 @@ void UBlenderGeometryNodesComponent::EnsureDefaults()
 		TileGap.SliderMin = 0.0f;
 		TileGap.SliderMax = 0.72f;
 		Inputs.Add(TileGap);
+
+		FBlenderGNInput BreathAmplitude;
+		BreathAmplitude.DisplayName = TEXT("Breath Amplitude");
+		BreathAmplitude.SocketName = TEXT("Breath Amplitude");
+		BreathAmplitude.Type = EBlenderGNParameterType::Float;
+		BreathAmplitude.FloatValue = 0.12f;
+		BreathAmplitude.SliderMin = 0.0f;
+		BreathAmplitude.SliderMax = 0.35f;
+		Inputs.Add(BreathAmplitude);
+
+		FBlenderGNInput BreathSpeed;
+		BreathSpeed.DisplayName = TEXT("Breath Speed");
+		BreathSpeed.SocketName = TEXT("Breath Speed");
+		BreathSpeed.Type = EBlenderGNParameterType::Float;
+		BreathSpeed.FloatValue = 1.15f;
+		BreathSpeed.SliderMin = 0.0f;
+		BreathSpeed.SliderMax = 4.0f;
+		Inputs.Add(BreathSpeed);
+
+		FBlenderGNInput BreathNoiseScale;
+		BreathNoiseScale.DisplayName = TEXT("Breath Noise Scale");
+		BreathNoiseScale.SocketName = TEXT("Breath Noise Scale");
+		BreathNoiseScale.Type = EBlenderGNParameterType::Float;
+		BreathNoiseScale.FloatValue = 1.75f;
+		BreathNoiseScale.SliderMin = 0.2f;
+		BreathNoiseScale.SliderMax = 10.0f;
+		Inputs.Add(BreathNoiseScale);
 	}
 }
 
@@ -95,6 +122,8 @@ void UBlenderGeometryNodesComponent::TickComponent(float DeltaTime, ELevelTick T
 			RequestRefresh(false);
 		}
 	}
+
+	ApplyPreviewAnimation(Now);
 }
 
 #if WITH_EDITOR
@@ -169,6 +198,218 @@ void UBlenderGeometryNodesComponent::RequestRefreshForParameterChange()
 	{
 		RequestRefresh(false);
 	}
+}
+
+void UBlenderGeometryNodesComponent::ApplyPreviewAnimation(double TimeSeconds)
+{
+	if (!bEnablePreviewAnimation || LastMeshData.Vertices.Num() == 0 || LastMeshData.Sections.Num() == 0)
+	{
+		return;
+	}
+
+	const double MinFrameInterval = 1.0 / FMath::Max(1.0f, PreviewAnimationFrameRate);
+	if (TimeSeconds - LastPreviewAnimationTime < MinFrameInterval)
+	{
+		return;
+	}
+	LastPreviewAnimationTime = TimeSeconds;
+
+	EnsureFastDynamicMesh();
+	if (!FastDynamicMesh || FastDynamicMesh->GetVertexCount() != LastMeshData.Vertices.Num())
+	{
+		return;
+	}
+
+	if (PreviewVertexIsland.Num() != LastMeshData.Vertices.Num() || PreviewIslandNormals.Num() == 0 || PreviewIslandPhases.Num() == 0)
+	{
+		BuildPreviewAnimationCache();
+	}
+	if (PreviewVertexIsland.Num() != LastMeshData.Vertices.Num() || PreviewIslandNormals.Num() == 0)
+	{
+		return;
+	}
+
+	const float Amplitude = GetFloatInput(TEXT("Breath Amplitude"), 0.12f) * BlenderToUnrealScale;
+	const float Speed = GetFloatInput(TEXT("Breath Speed"), 1.15f);
+	if (FMath::IsNearlyZero(Amplitude) || FMath::IsNearlyZero(Speed))
+	{
+		return;
+	}
+
+	const float TimePhase = static_cast<float>(TimeSeconds) * Speed;
+	const float Smoothness = FMath::Clamp(PreviewAnimationSmoothness, 0.0f, 1.0f);
+	const float Blend = FMath::Lerp(1.0f, 0.35f, Smoothness);
+	const float AmpBlend = Amplitude * Blend;
+
+	if (PreviewIslandOffsets.Num() != PreviewIslandNormals.Num())
+	{
+		PreviewIslandOffsets.SetNumUninitialized(PreviewIslandNormals.Num());
+	}
+	for (int32 Island = 0; Island < PreviewIslandNormals.Num(); ++Island)
+	{
+		const float Wave = FMath::Sin(TimePhase + PreviewIslandPhases[Island]);
+		const float Shaped = FMath::Lerp(Wave, FMath::SmoothStep(-1.0f, 1.0f, Wave), Smoothness);
+		PreviewIslandOffsets[Island] = PreviewIslandNormals[Island] * (Shaped * AmpBlend);
+	}
+
+	const int32 VertexCount = LastMeshData.Vertices.Num();
+	if (PreviewAnimatedVertices.Num() != VertexCount)
+	{
+		PreviewAnimatedVertices.SetNumUninitialized(VertexCount);
+	}
+	const FVector* RESTRICT BaseVerts = LastMeshData.Vertices.GetData();
+	const int32* RESTRICT Islands = PreviewVertexIsland.GetData();
+	const FVector* RESTRICT Offsets = PreviewIslandOffsets.GetData();
+	FVector* RESTRICT OutVerts = PreviewAnimatedVertices.GetData();
+	for (int32 Index = 0; Index < VertexCount; ++Index)
+	{
+		OutVerts[Index] = BaseVerts[Index] + Offsets[Islands[Index]];
+	}
+
+	// Fast path: only upload position buffer to GPU
+	FastDynamicMesh->UpdatePositionsOnly(PreviewAnimatedVertices);
+}
+
+void UBlenderGeometryNodesComponent::BuildPreviewAnimationCache()
+{
+	PreviewVertexIsland.Reset();
+	PreviewIslandNormals.Reset();
+	PreviewIslandPhases.Reset();
+
+	const int32 VertexCount = LastMeshData.Vertices.Num();
+	if (VertexCount == 0 || LastMeshData.Triangles.Num() == 0)
+	{
+		return;
+	}
+
+	TArray<int32> Parent;
+	TArray<int32> Rank;
+	Parent.SetNumUninitialized(VertexCount);
+	Rank.Init(0, VertexCount);
+	for (int32 Index = 0; Index < VertexCount; ++Index)
+	{
+		Parent[Index] = Index;
+	}
+
+	TFunction<int32(int32)> FindRoot = [&Parent, &FindRoot](int32 Index) -> int32
+	{
+		if (Parent[Index] != Index)
+		{
+			Parent[Index] = FindRoot(Parent[Index]);
+		}
+		return Parent[Index];
+	};
+
+	auto Union = [&Parent, &Rank, &FindRoot](int32 A, int32 B)
+	{
+		int32 RootA = FindRoot(A);
+		int32 RootB = FindRoot(B);
+		if (RootA == RootB)
+		{
+			return;
+		}
+		if (Rank[RootA] < Rank[RootB])
+		{
+			Swap(RootA, RootB);
+		}
+		Parent[RootB] = RootA;
+		if (Rank[RootA] == Rank[RootB])
+		{
+			++Rank[RootA];
+		}
+	};
+
+	TMap<FIntVector, int32> PositionRepresentative;
+	constexpr float PositionQuantization = 1000.0f;
+	for (int32 Index = 0; Index < VertexCount; ++Index)
+	{
+		const FVector& Vertex = LastMeshData.Vertices[Index];
+		const FIntVector Key(
+			FMath::RoundToInt(Vertex.X * PositionQuantization),
+			FMath::RoundToInt(Vertex.Y * PositionQuantization),
+			FMath::RoundToInt(Vertex.Z * PositionQuantization));
+		if (int32* Existing = PositionRepresentative.Find(Key))
+		{
+			Union(Index, *Existing);
+		}
+		else
+		{
+			PositionRepresentative.Add(Key, Index);
+		}
+	}
+
+	TMap<FIntVector, int32> DirectionRepresentative;
+	constexpr float DirectionQuantization = 16.0f;
+	for (int32 Index = 0; Index < VertexCount; ++Index)
+	{
+		const FVector Direction = (LastMeshData.Vertices[Index] - LastMeshCenter).GetSafeNormal();
+		if (Direction.IsNearlyZero())
+		{
+			continue;
+		}
+
+		const FIntVector Key(
+			FMath::RoundToInt(Direction.X * DirectionQuantization),
+			FMath::RoundToInt(Direction.Y * DirectionQuantization),
+			FMath::RoundToInt(Direction.Z * DirectionQuantization));
+		if (int32* Existing = DirectionRepresentative.Find(Key))
+		{
+			Union(Index, *Existing);
+		}
+		else
+		{
+			DirectionRepresentative.Add(Key, Index);
+		}
+	}
+
+	for (int32 Index = 0; Index + 2 < LastMeshData.Triangles.Num(); Index += 3)
+	{
+		const int32 A = LastMeshData.Triangles[Index];
+		const int32 B = LastMeshData.Triangles[Index + 1];
+		const int32 C = LastMeshData.Triangles[Index + 2];
+		if (LastMeshData.Vertices.IsValidIndex(A) && LastMeshData.Vertices.IsValidIndex(B) && LastMeshData.Vertices.IsValidIndex(C))
+		{
+			Union(A, B);
+			Union(B, C);
+			Union(C, A);
+		}
+	}
+
+	TMap<int32, int32> RootToIsland;
+	TArray<FVector> IslandCenters;
+	TArray<int32> IslandCounts;
+	PreviewVertexIsland.SetNumUninitialized(VertexCount);
+	for (int32 Index = 0; Index < VertexCount; ++Index)
+	{
+		const int32 Root = FindRoot(Index);
+		int32* IslandPtr = RootToIsland.Find(Root);
+		if (!IslandPtr)
+		{
+			const int32 NewIsland = IslandCenters.Num();
+			RootToIsland.Add(Root, NewIsland);
+			IslandCenters.Add(FVector::ZeroVector);
+			IslandCounts.Add(0);
+			IslandPtr = RootToIsland.Find(Root);
+		}
+
+		const int32 Island = *IslandPtr;
+		PreviewVertexIsland[Index] = Island;
+		IslandCenters[Island] += LastMeshData.Vertices[Index];
+		++IslandCounts[Island];
+	}
+
+	const float NoiseScale = FMath::Max(0.2f, GetFloatInput(TEXT("Breath Noise Scale"), 1.75f));
+	PreviewIslandNormals.SetNum(IslandCenters.Num());
+	PreviewIslandPhases.SetNum(IslandCenters.Num());
+	for (int32 Island = 0; Island < IslandCenters.Num(); ++Island)
+	{
+		const FVector Center = IslandCenters[Island] / static_cast<float>(FMath::Max(1, IslandCounts[Island]));
+		const FVector Normal = (Center - LastMeshCenter).GetSafeNormal();
+		PreviewIslandNormals[Island] = Normal.IsNearlyZero() ? FVector::UpVector : Normal;
+		PreviewIslandPhases[Island] = Hash01((Island + 1) * 37) * 2.0f * PI * NoiseScale;
+	}
+
+	PreviewAnimatedVertices = LastMeshData.Vertices;
 }
 
 void UBlenderGeometryNodesComponent::StartBackgroundRefresh(const FString& RequestHash)
@@ -255,7 +496,7 @@ void UBlenderGeometryNodesComponent::StartBackgroundRefresh(const FString& Reque
 					bReadOk = UBlenderGeometryNodesComponent::ReadJsonMeshCache(JsonText, Scale, Result.MeshData, Error);
 				}
 				Result.bSuccess = bReadOk;
-				if (Result.bSuccess && bShouldSmoothNormals)
+				if (Result.bSuccess && bShouldSmoothNormals && !Result.MeshData.bImportedNormals)
 				{
 					UBlenderGeometryNodesComponent::SmoothNormalsByPosition(Result.MeshData, SmoothQuantization);
 				}
@@ -385,42 +626,121 @@ FString UBlenderGeometryNodesComponent::BuildRequestHash() const
 
 void UBlenderGeometryNodesComponent::ApplyMeshData(const FBlenderGNMeshData& MeshData)
 {
+	const int32 PreviousVertexCount = LastVertexCount;
+	const int32 PreviousTriangleCount = LastTriangleCount;
+	const int32 PreviousSectionCount = LastMeshData.Sections.Num();
+
 	LastMeshData = MeshData;
 	LastVertexCount = LastMeshData.Vertices.Num();
 	LastTriangleCount = LastMeshData.GetTriangleCount();
+	LastMeshCenter = FVector::ZeroVector;
+	LastPreviewAnimationTime = -999.0;
+	if (LastMeshData.Vertices.Num() > 0)
+	{
+		for (const FVector& Vertex : LastMeshData.Vertices)
+		{
+			LastMeshCenter += Vertex;
+		}
+		LastMeshCenter /= static_cast<float>(LastMeshData.Vertices.Num());
+	}
+
+	const bool bTopologyUnchanged = (LastVertexCount == PreviousVertexCount)
+		&& (LastTriangleCount == PreviousTriangleCount)
+		&& (LastMeshData.Sections.Num() == PreviousSectionCount)
+		&& (PreviousVertexCount > 0);
+
+	if (!bTopologyUnchanged)
+	{
+		BuildPreviewAnimationCache();
+		if (FastDynamicMesh)
+		{
+			FastDynamicMesh->DestroyComponent();
+			FastDynamicMesh = nullptr;
+		}
+	}
 
 	UProceduralMeshComponent* ProceduralMesh = EnsureProceduralMesh();
+	if (ProceduralMesh)
+	{
+		ProceduralMesh->SetVisibility(!FastDynamicMesh);
+	}
 	if (!ProceduralMesh)
 	{
 		LastStatus = TEXT("Could not create ProceduralMeshComponent.");
 		return;
 	}
 
-	ProceduralMesh->ClearAllMeshSections();
-	for (int32 SectionIndex = 0; SectionIndex < LastMeshData.Sections.Num(); ++SectionIndex)
+	if (LastMeshData.bImportedNormals && LastMeshData.Normals.Num() == LastMeshData.Vertices.Num())
 	{
-		const FBlenderGNMeshSection& Section = LastMeshData.Sections[SectionIndex];
-		TArray<FLinearColor> VertexColors;
-		TArray<FProcMeshTangent> Tangents;
-		TArray<FVector> CalculatedNormals;
-		UKismetProceduralMeshLibrary::CalculateTangentsForMesh(LastMeshData.Vertices, Section.Triangles, LastMeshData.UVs, CalculatedNormals, Tangents);
-		ProceduralMesh->CreateMeshSection_LinearColor(
-			SectionIndex,
-			LastMeshData.Vertices,
-			Section.Triangles,
-			bApplyImportedNormals ? LastMeshData.Normals : CalculatedNormals,
-			LastMeshData.UVs,
-			VertexColors,
-			Tangents,
-			false);
-
-		if (MaterialOverrides.IsValidIndex(SectionIndex) && MaterialOverrides[SectionIndex])
+		PreviewStableNormals = LastMeshData.Normals;
+	}
+	else
+	{
+		FBlenderGNMeshData MeshWithRecalculatedNormals = LastMeshData;
+		RecalculateNormalsForTriangleWinding(MeshWithRecalculatedNormals);
+		PreviewStableNormals = MoveTemp(MeshWithRecalculatedNormals.Normals);
+	}
+	if (bInvertShadingNormals)
+	{
+		for (FVector& Normal : PreviewStableNormals)
 		{
-			ProceduralMesh->SetMaterial(SectionIndex, MaterialOverrides[SectionIndex]);
+			Normal *= -1.0;
 		}
-		else if (FallbackMaterial)
+	}
+	CalculateTangentsAlignedWithNormals(LastMeshData, PreviewStableNormals, PreviewStableTangents);
+
+	if (bTopologyUnchanged)
+	{
+		for (int32 SectionIndex = 0; SectionIndex < LastMeshData.Sections.Num(); ++SectionIndex)
 		{
-			ProceduralMesh->SetMaterial(SectionIndex, FallbackMaterial);
+			ProceduralMesh->UpdateMeshSection_LinearColor(
+				SectionIndex,
+				LastMeshData.Vertices,
+				PreviewStableNormals,
+				LastMeshData.UVs,
+				PreviewVertexColors,
+				PreviewStableTangents);
+		}
+	}
+	else
+	{
+		PreviewVertexColors.Reset();
+		PreviewVertexColors.Init(FLinearColor(0.72f, 0.72f, 0.68f, 1.0f), LastMeshData.Vertices.Num());
+
+		ProceduralMesh->SetCastShadow(bCastShadows);
+		ProceduralMesh->ClearAllMeshSections();
+		for (int32 SectionIndex = 0; SectionIndex < LastMeshData.Sections.Num(); ++SectionIndex)
+		{
+			const FBlenderGNMeshSection& Section = LastMeshData.Sections[SectionIndex];
+			ProceduralMesh->CreateMeshSection_LinearColor(
+				SectionIndex,
+				LastMeshData.Vertices,
+				Section.Triangles,
+				PreviewStableNormals,
+				LastMeshData.UVs,
+				PreviewVertexColors,
+				PreviewStableTangents,
+				false);
+
+			if (bForceDefaultMaterial)
+			{
+				if (UMaterialInterface* DefaultMaterial = UMaterial::GetDefaultMaterial(MD_Surface))
+				{
+					ProceduralMesh->SetMaterial(SectionIndex, DefaultMaterial);
+				}
+			}
+			else if (MaterialOverrides.IsValidIndex(SectionIndex) && MaterialOverrides[SectionIndex])
+			{
+				ProceduralMesh->SetMaterial(SectionIndex, MaterialOverrides[SectionIndex]);
+			}
+			else if (FallbackMaterial)
+			{
+				ProceduralMesh->SetMaterial(SectionIndex, FallbackMaterial);
+			}
+			else if (UMaterialInterface* DefaultMaterial = UMaterial::GetDefaultMaterial(MD_Surface))
+			{
+				ProceduralMesh->SetMaterial(SectionIndex, DefaultMaterial);
+			}
 		}
 	}
 
@@ -434,6 +754,61 @@ void UBlenderGeometryNodesComponent::ReapplyLastMeshData()
 		return;
 	}
 	ApplyMeshData(LastMeshData);
+}
+
+void UBlenderGeometryNodesComponent::EnsureFastDynamicMesh()
+{
+	if (FastDynamicMesh && FastDynamicMesh->GetVertexCount() == LastMeshData.Vertices.Num())
+	{
+		return;
+	}
+
+	AActor* Owner = GetOwner();
+	if (!Owner || LastMeshData.Vertices.Num() == 0)
+	{
+		return;
+	}
+
+	if (!FastDynamicMesh)
+	{
+		FastDynamicMesh = NewObject<UBlenderGNFastDynamicMeshComponent>(Owner, TEXT("BlenderGN_FastDynMesh"));
+		FastDynamicMesh->SetupAttachment(Owner->GetRootComponent());
+		FastDynamicMesh->RegisterComponent();
+		Owner->AddInstanceComponent(FastDynamicMesh);
+	}
+
+	TArray<FColor> Colors;
+	Colors.Init(FColor(184, 184, 173, 255), LastMeshData.Vertices.Num());
+
+	FastDynamicMesh->InitMesh(
+		LastMeshData.Vertices,
+		LastMeshData.Triangles,
+		PreviewStableNormals.Num() == LastMeshData.Vertices.Num() ? PreviewStableNormals : LastMeshData.Normals,
+		LastMeshData.UVs,
+		Colors,
+		PreviewStableTangents);
+
+	UMaterialInterface* Mat = nullptr;
+	if (MaterialOverrides.Num() > 0 && MaterialOverrides[0])
+	{
+		Mat = MaterialOverrides[0];
+	}
+	else if (FallbackMaterial)
+	{
+		Mat = FallbackMaterial;
+	}
+	if (Mat)
+	{
+		FastDynamicMesh->SetMaterial(0, Mat);
+	}
+
+	FastDynamicMesh->SetCastShadow(bCastShadows);
+	FastDynamicMesh->SetVisibility(true);
+
+	if (CachedProceduralMesh)
+	{
+		CachedProceduralMesh->SetVisibility(false);
+	}
 }
 
 UProceduralMeshComponent* UBlenderGeometryNodesComponent::EnsureProceduralMesh()
@@ -609,6 +984,7 @@ bool UBlenderGeometryNodesComponent::ReadJsonMeshCache(const FString& JsonText, 
 	}
 	if (Normals && Normals->Num() == Vertices->Num())
 	{
+		OutMeshData.bImportedNormals = true;
 		for (int32 Index = 0; Index + 2 < Normals->Num(); Index += 3)
 		{
 			OutMeshData.Normals.Add(ConvertNormal((*Normals)[Index]->AsNumber(), (*Normals)[Index + 1]->AsNumber(), (*Normals)[Index + 2]->AsNumber()));
@@ -745,7 +1121,7 @@ bool UBlenderGeometryNodesComponent::ReadBinaryMeshCache(const FString& FilePath
 	}
 	Offset += 8;
 	uint32 Version = 0;
-	if (!ReadU32(Version) || (Version != 1 && Version != 2))
+	if (!ReadU32(Version) || (Version != 1 && Version != 2 && Version != 3))
 	{
 		OutError = TEXT("Unsupported Blender GN binary cache version.");
 		return false;
@@ -792,6 +1168,7 @@ bool UBlenderGeometryNodesComponent::ReadBinaryMeshCache(const FString& FilePath
 	{
 		OutMeshData.Normals.Add(ConvertNormal(RawNormals[Index], RawNormals[Index + 1], RawNormals[Index + 2]));
 	}
+	OutMeshData.bImportedNormals = OutMeshData.Normals.Num() == OutMeshData.Vertices.Num();
 	for (int32 Index = 0; Index + 1 < RawUvs.Num(); Index += 2)
 	{
 		OutMeshData.UVs.Add(FVector2D(RawUvs[Index], 1.0f - RawUvs[Index + 1]));
@@ -823,6 +1200,29 @@ bool UBlenderGeometryNodesComponent::ReadBinaryMeshCache(const FString& FilePath
 			return false;
 		}
 		OutMeshData.Materials.Add(Info);
+	}
+	if (Version >= 3 && MaterialNameCount > 0)
+	{
+		TArray<float> RawMaterialColors;
+		TArray<float> RawMaterialMetallic;
+		TArray<float> RawMaterialRoughness;
+		if (ReadFloatArray(RawMaterialColors, static_cast<int32>(MaterialNameCount) * 4) &&
+			ReadFloatArray(RawMaterialMetallic, static_cast<int32>(MaterialNameCount)) &&
+			ReadFloatArray(RawMaterialRoughness, static_cast<int32>(MaterialNameCount)))
+		{
+			for (uint32 Index = 0; Index < MaterialNameCount; ++Index)
+			{
+				FBlenderGNMaterialInfo& Info = OutMeshData.Materials[Index];
+				const int32 ColorOffset = static_cast<int32>(Index) * 4;
+				Info.BaseColor = FLinearColor(
+					RawMaterialColors[ColorOffset],
+					RawMaterialColors[ColorOffset + 1],
+					RawMaterialColors[ColorOffset + 2],
+					RawMaterialColors[ColorOffset + 3]);
+				Info.Metallic = RawMaterialMetallic[Index];
+				Info.Roughness = RawMaterialRoughness[Index];
+			}
+		}
 	}
 	if (OutMeshData.Normals.Num() != OutMeshData.Vertices.Num())
 	{
@@ -860,9 +1260,13 @@ void UBlenderGeometryNodesComponent::NormalizeTriangleWindingAndNormals(FBlender
 		return;
 	}
 
-	const bool bHasImportedLoopNormals = MeshData.Normals.Num() == MeshData.Vertices.Num();
+	const bool bHasImportedLoopNormals = MeshData.bImportedNormals && MeshData.Normals.Num() == MeshData.Vertices.Num();
 	if (bHasImportedLoopNormals)
 	{
+		for (FVector& Normal : MeshData.Normals)
+		{
+			Normal = Normal.IsNearlyZero() ? FVector::UpVector : Normal.GetSafeNormal();
+		}
 		for (int32 TriangleIndex = 0; TriangleIndex < TriangleCount; ++TriangleIndex)
 		{
 			const int32 Offset = TriangleIndex * 3;
@@ -876,15 +1280,10 @@ void UBlenderGeometryNodesComponent::NormalizeTriangleWindingAndNormals(FBlender
 
 			const FVector FaceNormal = FVector::CrossProduct(MeshData.Vertices[B] - MeshData.Vertices[A], MeshData.Vertices[C] - MeshData.Vertices[A]).GetSafeNormal();
 			const FVector ImportedNormal = (MeshData.Normals[A] + MeshData.Normals[B] + MeshData.Normals[C]).GetSafeNormal();
-			if (!FaceNormal.IsNearlyZero() && !ImportedNormal.IsNearlyZero() && FVector::DotProduct(FaceNormal, ImportedNormal) < 0.0f)
+			if (!FaceNormal.IsNearlyZero() && !ImportedNormal.IsNearlyZero() && FVector::DotProduct(FaceNormal, ImportedNormal) > 0.0f)
 			{
 				FlipTriangleWinding(MeshData.Triangles, TriangleIndex);
 			}
-		}
-
-		for (FVector& Normal : MeshData.Normals)
-		{
-			Normal = Normal.IsNearlyZero() ? FVector::UpVector : Normal.GetSafeNormal();
 		}
 		return;
 	}
@@ -900,6 +1299,7 @@ void UBlenderGeometryNodesComponent::RecalculateNormalsForTriangleWinding(FBlend
 	}
 
 	MeshData.Normals.Reset();
+	MeshData.bImportedNormals = false;
 	MeshData.Normals.SetNumZeroed(MeshData.Vertices.Num());
 
 	for (int32 Index = 0; Index + 2 < MeshData.Triangles.Num(); Index += 3)
@@ -926,6 +1326,69 @@ void UBlenderGeometryNodesComponent::RecalculateNormalsForTriangleWinding(FBlend
 	for (FVector& Normal : MeshData.Normals)
 	{
 		Normal = Normal.IsNearlyZero() ? FVector::UpVector : Normal.GetSafeNormal();
+	}
+}
+
+void UBlenderGeometryNodesComponent::CalculateTangentsAlignedWithNormals(const FBlenderGNMeshData& MeshData, const TArray<FVector>& Normals, TArray<FProcMeshTangent>& OutTangents)
+{
+	OutTangents.Reset();
+	const int32 VertexCount = MeshData.Vertices.Num();
+	if (VertexCount == 0)
+	{
+		return;
+	}
+
+	OutTangents.SetNum(VertexCount);
+	TArray<FVector> TangentSums;
+	TArray<FVector> BitangentSums;
+	TangentSums.Init(FVector::ZeroVector, VertexCount);
+	BitangentSums.Init(FVector::ZeroVector, VertexCount);
+
+	for (int32 Index = 0; Index + 2 < MeshData.Triangles.Num(); Index += 3)
+	{
+		const int32 A = MeshData.Triangles[Index];
+		const int32 B = MeshData.Triangles[Index + 1];
+		const int32 C = MeshData.Triangles[Index + 2];
+		if (!MeshData.Vertices.IsValidIndex(A) || !MeshData.Vertices.IsValidIndex(B) || !MeshData.Vertices.IsValidIndex(C) ||
+			!MeshData.UVs.IsValidIndex(A) || !MeshData.UVs.IsValidIndex(B) || !MeshData.UVs.IsValidIndex(C))
+		{
+			continue;
+		}
+
+		const FVector Edge1 = MeshData.Vertices[B] - MeshData.Vertices[A];
+		const FVector Edge2 = MeshData.Vertices[C] - MeshData.Vertices[A];
+		const FVector2D DeltaUV1 = MeshData.UVs[B] - MeshData.UVs[A];
+		const FVector2D DeltaUV2 = MeshData.UVs[C] - MeshData.UVs[A];
+		const double Denominator = DeltaUV1.X * DeltaUV2.Y - DeltaUV2.X * DeltaUV1.Y;
+		if (FMath::IsNearlyZero(Denominator, 1.0e-8))
+		{
+			continue;
+		}
+
+		const double InvDenominator = 1.0 / Denominator;
+		const FVector Tangent = (Edge1 * DeltaUV2.Y - Edge2 * DeltaUV1.Y) * InvDenominator;
+		const FVector Bitangent = (Edge2 * DeltaUV1.X - Edge1 * DeltaUV2.X) * InvDenominator;
+		TangentSums[A] += Tangent;
+		TangentSums[B] += Tangent;
+		TangentSums[C] += Tangent;
+		BitangentSums[A] += Bitangent;
+		BitangentSums[B] += Bitangent;
+		BitangentSums[C] += Bitangent;
+	}
+
+	for (int32 Index = 0; Index < VertexCount; ++Index)
+	{
+		const FVector Normal = Normals.IsValidIndex(Index) && !Normals[Index].IsNearlyZero() ? Normals[Index].GetSafeNormal() : FVector::UpVector;
+		FVector Tangent = TangentSums[Index] - Normal * FVector::DotProduct(Normal, TangentSums[Index]);
+		if (Tangent.IsNearlyZero())
+		{
+			const FVector ReferenceAxis = FMath::Abs(Normal.Z) < 0.9f ? FVector::UpVector : FVector::ForwardVector;
+			Tangent = ReferenceAxis - Normal * FVector::DotProduct(Normal, ReferenceAxis);
+		}
+		Tangent = Tangent.IsNearlyZero() ? FVector::RightVector : Tangent.GetSafeNormal();
+
+		const bool bFlipTangentY = FVector::DotProduct(FVector::CrossProduct(Normal, Tangent), BitangentSums[Index]) < 0.0f;
+		OutTangents[Index] = FProcMeshTangent(Tangent, bFlipTangentY);
 	}
 }
 
@@ -960,6 +1423,17 @@ void UBlenderGeometryNodesComponent::SmoothNormalsByPosition(FBlenderGNMeshData&
 			MeshData.Normals[Index] = Sum->IsNearlyZero() ? MeshData.Normals[Index] : Sum->GetSafeNormal();
 		}
 	}
+}
+
+float UBlenderGeometryNodesComponent::Hash01(int32 Seed)
+{
+	uint32 X = static_cast<uint32>(Seed);
+	X ^= X >> 16;
+	X *= 0x7feb352d;
+	X ^= X >> 15;
+	X *= 0x846ca68b;
+	X ^= X >> 16;
+	return static_cast<float>(X & 0x00FFFFFF) / 16777215.0f;
 }
 
 FString UBlenderGeometryNodesComponent::FindDefaultBlenderPath()

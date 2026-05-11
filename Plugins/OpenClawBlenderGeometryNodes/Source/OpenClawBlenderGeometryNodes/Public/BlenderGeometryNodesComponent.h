@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "BlenderGeometryNodesTypes.h"
 #include "Components/ActorComponent.h"
+#include "ProceduralMeshComponent.h"
+#include "BlenderGNFastDynamicMeshComponent.h"
 #include "BlenderGeometryNodesComponent.generated.h"
 
 class UMaterialInterface;
@@ -60,6 +62,15 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry Nodes")
 	TArray<FBlenderGNInput> Inputs;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
+	bool bEnablePreviewAnimation = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float PreviewAnimationSmoothness = 0.72f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation", meta = (ClampMin = "1.0", ClampMax = "120.0"))
+	float PreviewAnimationFrameRate = 30.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Output")
 	TObjectPtr<UMaterialInterface> FallbackMaterial;
 
@@ -71,6 +82,15 @@ public:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Output")
 	bool bSmoothNormalsByPosition = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Output")
+	bool bCastShadows = true;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+	bool bForceDefaultMaterial = false;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Debug")
+	bool bInvertShadingNormals = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Output", meta = (ClampMin = "1000", ClampMax = "100000"))
 	float NormalSmoothQuantization = 10000.0f;
@@ -136,6 +156,7 @@ public:
 	UProceduralMeshComponent* GetProceduralMesh() const;
 
 	const FBlenderGNMeshData& GetLastMeshData() const { return LastMeshData; }
+	const TArray<FProcMeshTangent>& GetLastTangents() const { return PreviewStableTangents; }
 	FBlenderGNMeshData& GetMutableLastMeshData() { return LastMeshData; }
 	void ApplyMeshData(const FBlenderGNMeshData& MeshData);
 	void ReapplyLastMeshData();
@@ -163,16 +184,50 @@ private:
 	TObjectPtr<UProceduralMeshComponent> CachedProceduralMesh;
 
 	UPROPERTY(Transient)
+	TObjectPtr<UBlenderGNFastDynamicMeshComponent> FastDynamicMesh;
+
+	UPROPERTY(Transient)
 	FBlenderGNMeshData LastMeshData;
+
+	UPROPERTY(Transient)
+	FVector LastMeshCenter = FVector::ZeroVector;
+
+	UPROPERTY(Transient)
+	TArray<int32> PreviewVertexIsland;
+
+	UPROPERTY(Transient)
+	TArray<FVector> PreviewIslandNormals;
+
+	UPROPERTY(Transient)
+	TArray<float> PreviewIslandPhases;
+
+	UPROPERTY(Transient)
+	TArray<FVector> PreviewIslandOffsets;
+
+	UPROPERTY(Transient)
+	TArray<FVector> PreviewAnimatedVertices;
+
+	UPROPERTY(Transient)
+	TArray<FVector> PreviewStableNormals;
+
+	UPROPERTY(Transient)
+	TArray<FProcMeshTangent> PreviewStableTangents;
+
+	UPROPERTY(Transient)
+	TArray<FLinearColor> PreviewVertexColors;
 
 	FString LastRequestHash;
 	FString ActiveRequestHash;
 	double LastRefreshStartTime = -999.0;
+	double LastPreviewAnimationTime = -999.0;
 	double NextFixedRefreshTime = 0.0;
 	double QueuedRefreshTime = 0.0;
 
 	void EnsureDefaults();
 	void RequestRefreshForParameterChange();
+	void ApplyPreviewAnimation(double TimeSeconds);
+	void BuildPreviewAnimationCache();
+	void EnsureFastDynamicMesh();
 	UProceduralMeshComponent* EnsureProceduralMesh();
 	FBlenderGNInput* FindInput(const FString& SocketName);
 	const FBlenderGNInput* FindInput(const FString& SocketName) const;
@@ -187,5 +242,7 @@ private:
 	static FVector ConvertNormal(float X, float Y, float Z);
 	static void NormalizeTriangleWindingAndNormals(FBlenderGNMeshData& MeshData);
 	static void RecalculateNormalsForTriangleWinding(FBlenderGNMeshData& MeshData);
+	static void CalculateTangentsAlignedWithNormals(const FBlenderGNMeshData& MeshData, const TArray<FVector>& Normals, TArray<FProcMeshTangent>& OutTangents);
 	static void SmoothNormalsByPosition(FBlenderGNMeshData& MeshData, float Quantization);
+	static float Hash01(int32 Seed);
 };
