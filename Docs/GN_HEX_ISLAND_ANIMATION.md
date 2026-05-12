@@ -24,6 +24,8 @@ triangles: 6552
 - Avoid the abandoned material WPO experiment unless it is redesigned and validated from scratch. The editor asset `M_GN_HexIsland_WPO` caused transparent/default-material confusion and was removed from the working route.
 - `Force Default Material` must override fallback and material overrides for all procedural, fast dynamic, and island preview paths.
 - When mesh data refreshes, destroy and rebuild the transient fast mesh so parameter changes are reflected immediately.
+- Keep `DisplayName` and `SocketName` synchronized from the socket name, but do not blindly trust serialized defaults. If an old map saved every input as `Hex Subdivisions`, repair the known 5-slot Hex Sphere input set by index before syncing labels.
+- Use `TitleProperty = "SocketName"` on the input array so Details panel rows show the actual Geometry Nodes socket instead of a stale/default struct label.
 - Before closing or restarting the editor, always run `save_all`.
 
 ## Recommended MCP Verification
@@ -41,6 +43,16 @@ await send("focus_viewport", {
 await send("openclaw_gn_get_status", {
   actor_name: "ScifiHexSphere_OuterShell_GN"
 });
+```
+
+The status response should include these matching input labels:
+
+```text
+Hex Subdivisions
+Tile Gap
+Breath Amplitude
+Breath Speed
+Breath Noise Scale
 ```
 
 Use `openclaw_gn_configure_refresh` with:

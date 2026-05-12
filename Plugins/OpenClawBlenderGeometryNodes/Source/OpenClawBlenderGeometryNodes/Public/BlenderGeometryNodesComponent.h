@@ -59,7 +59,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Refresh")
 	bool bUseBinaryMeshCache = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry Nodes")
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry Nodes", meta = (TitleProperty = "SocketName"))
 	TArray<FBlenderGNInput> Inputs;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
@@ -177,6 +177,7 @@ public:
 	static FString GetDefaultSidecarPath();
 
 protected:
+	virtual void OnRegister() override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;

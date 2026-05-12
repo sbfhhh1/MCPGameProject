@@ -563,6 +563,10 @@ FReply FOpenClawBlenderGeometryNodesComponentDetails::CleanLabels()
 		Input.DisplayName = ToAsciiLabel(Input.DisplayName);
 		const FString CleanSocket = ToAsciiLabel(Input.SocketName);
 		Input.SocketName = CleanSocket.Equals(TEXT("Input")) && !Input.DisplayName.Equals(TEXT("Input")) ? Input.DisplayName : CleanSocket;
+		if (!Input.SocketName.IsEmpty())
+		{
+			Input.DisplayName = Input.SocketName;
+		}
 	}
 	Component->LastStatus = TEXT("Cleaned Geometry Nodes input labels.");
 	Component->NotifyParametersChanged();

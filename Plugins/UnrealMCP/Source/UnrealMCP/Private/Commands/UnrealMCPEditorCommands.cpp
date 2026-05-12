@@ -177,6 +177,14 @@ namespace
         {
             Input.SocketName = InputObject->GetStringField(TEXT("name"));
         }
+        if (Input.SocketName.IsEmpty())
+        {
+            Input.SocketName = Input.DisplayName;
+        }
+        if (!Input.SocketName.IsEmpty())
+        {
+            Input.DisplayName = Input.SocketName;
+        }
         if (InputObject->HasField(TEXT("fallback_identifier")))
         {
             Input.FallbackIdentifier = InputObject->GetStringField(TEXT("fallback_identifier"));
@@ -1162,6 +1170,16 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenClawGNConfigureRefre
     ResultObj->SetNumberField(TEXT("hex_subdivisions"), Component->GetIntInput(TEXT("Hex Subdivisions"), 2));
     ResultObj->SetNumberField(TEXT("preview_islands"), Component->LastPreviewIslandCount);
     ResultObj->SetStringField(TEXT("preview_animation_status"), Component->LastPreviewAnimationStatus);
+    TArray<TSharedPtr<FJsonValue>> InputArray;
+    for (const FBlenderGNInput& Input : Component->Inputs)
+    {
+        TSharedPtr<FJsonObject> InputObj = MakeShared<FJsonObject>();
+        InputObj->SetStringField(TEXT("display_name"), Input.DisplayName);
+        InputObj->SetStringField(TEXT("socket_name"), Input.SocketName);
+        InputObj->SetNumberField(TEXT("type"), static_cast<int32>(Input.Type));
+        InputArray.Add(MakeShared<FJsonValueObject>(InputObj));
+    }
+    ResultObj->SetArrayField(TEXT("inputs"), InputArray);
     return ResultObj;
 }
 
@@ -1210,6 +1228,16 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenClawGNGetStatus(cons
     ResultObj->SetNumberField(TEXT("hex_subdivisions"), Component->GetIntInput(TEXT("Hex Subdivisions"), 2));
     ResultObj->SetNumberField(TEXT("preview_islands"), Component->LastPreviewIslandCount);
     ResultObj->SetStringField(TEXT("preview_animation_status"), Component->LastPreviewAnimationStatus);
+    TArray<TSharedPtr<FJsonValue>> StatusInputArray;
+    for (const FBlenderGNInput& Input : Component->Inputs)
+    {
+        TSharedPtr<FJsonObject> InputObj = MakeShared<FJsonObject>();
+        InputObj->SetStringField(TEXT("display_name"), Input.DisplayName);
+        InputObj->SetStringField(TEXT("socket_name"), Input.SocketName);
+        InputObj->SetNumberField(TEXT("type"), static_cast<int32>(Input.Type));
+        StatusInputArray.Add(MakeShared<FJsonValueObject>(InputObj));
+    }
+    ResultObj->SetArrayField(TEXT("inputs"), StatusInputArray);
     return ResultObj;
 }
 

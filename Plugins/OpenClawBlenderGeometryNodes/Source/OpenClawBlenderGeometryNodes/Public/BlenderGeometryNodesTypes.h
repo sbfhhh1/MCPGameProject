@@ -26,10 +26,10 @@ struct OPENCLAWBLENDERGEOMETRYNODES_API FBlenderGNInput
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry Nodes")
-	FString DisplayName = TEXT("Hex Subdivisions");
+	FString DisplayName;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry Nodes")
-	FString SocketName = TEXT("Hex Subdivisions");
+	FString SocketName;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry Nodes")
 	FString FallbackIdentifier;
@@ -38,7 +38,7 @@ struct OPENCLAWBLENDERGEOMETRYNODES_API FBlenderGNInput
 	EBlenderGNParameterType Type = EBlenderGNParameterType::Int;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry Nodes", meta = (ClampMin = "0"))
-	int32 IntValue = 3;
+	int32 IntValue = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry Nodes")
 	float FloatValue = 0.16f;

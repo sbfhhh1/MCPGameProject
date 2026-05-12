@@ -15,6 +15,40 @@
 #include "Serialization/JsonReader.h"
 #include "Serialization/JsonSerializer.h"
 
+namespace
+{
+constexpr int32 HexSphereRuntimeInputCount = 5;
+
+const TCHAR* HexSphereRuntimeInputNames[HexSphereRuntimeInputCount] =
+{
+	TEXT("Hex Subdivisions"),
+	TEXT("Tile Gap"),
+	TEXT("Breath Amplitude"),
+	TEXT("Breath Speed"),
+	TEXT("Breath Noise Scale")
+};
+
+bool IsHexSphereRuntimeInputSet(const TArray<FBlenderGNInput>& Inputs)
+{
+	if (Inputs.Num() != HexSphereRuntimeInputCount)
+	{
+		return false;
+	}
+
+	int32 HexSubdivisionNameCount = 0;
+	for (const FBlenderGNInput& Input : Inputs)
+	{
+		if (Input.SocketName.Equals(TEXT("Hex Subdivisions"), ESearchCase::IgnoreCase) ||
+			Input.DisplayName.Equals(TEXT("Hex Subdivisions"), ESearchCase::IgnoreCase))
+		{
+			++HexSubdivisionNameCount;
+		}
+	}
+
+	return HexSubdivisionNameCount > 1;
+}
+}
+
 UBlenderGeometryNodesComponent::UBlenderGeometryNodesComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -82,6 +116,42 @@ void UBlenderGeometryNodesComponent::EnsureDefaults()
 		BreathNoiseScale.SliderMax = 10.0f;
 		Inputs.Add(BreathNoiseScale);
 	}
+
+	if (IsHexSphereRuntimeInputSet(Inputs))
+	{
+		for (int32 Index = 0; Index < HexSphereRuntimeInputCount; ++Index)
+		{
+			Inputs[Index].SocketName = HexSphereRuntimeInputNames[Index];
+			Inputs[Index].DisplayName = HexSphereRuntimeInputNames[Index];
+		}
+	}
+
+	for (FBlenderGNInput& Input : Inputs)
+	{
+		if (Input.SocketName.IsEmpty())
+		{
+			Input.SocketName = Input.DisplayName;
+		}
+		if (!Input.SocketName.IsEmpty())
+		{
+			Input.DisplayName = Input.SocketName;
+		}
+	}
+}
+
+void UBlenderGeometryNodesComponent::OnRegister()
+{
+	Super::OnRegister();
+	EnsureDefaults();
+	SetComponentTickEnabled(true);
+
+#if WITH_EDITOR
+	UWorld* World = GetWorld();
+	if (!HasAnyFlags(RF_ClassDefaultObject) && World && !World->IsGameWorld() && LastMeshData.Vertices.Num() == 0 && RefreshMode != EBlenderGNRefreshMode::Manual)
+	{
+		RequestRefresh(true);
+	}
+#endif
 }
 
 void UBlenderGeometryNodesComponent::BeginPlay()
@@ -605,6 +675,15 @@ void UBlenderGeometryNodesComponent::StartBackgroundRefresh(const FString& Reque
 			{
 				Component->LastRequestHash = Component->ActiveRequestHash;
 				Component->ApplyMeshData(Result.MeshData);
+				if (Component->LastRequestHash.Equals(Component->BuildRequestHash(), ESearchCase::CaseSensitive))
+				{
+					Component->bHasPendingRefresh = false;
+				}
+				else if (Component->bHasPendingRefresh)
+				{
+					Component->bHasPendingRefresh = false;
+					Component->RequestRefresh(true);
+				}
 			}
 		});
 	});
@@ -830,6 +909,7 @@ void UBlenderGeometryNodesComponent::ApplyMeshData(const FBlenderGNMeshData& Mes
 	}
 
 	OnMeshUpdated.Broadcast(ProceduralMesh);
+	ApplyPreviewAnimation(FPlatformTime::Seconds());
 }
 
 void UBlenderGeometryNodesComponent::ReapplyLastMeshData()
