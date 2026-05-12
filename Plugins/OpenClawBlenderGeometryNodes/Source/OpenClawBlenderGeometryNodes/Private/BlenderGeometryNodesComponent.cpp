@@ -1,5 +1,6 @@
 #include "BlenderGeometryNodesComponent.h"
 
+#include "BlenderGNProceduralMeshUtils.h"
 #include "Async/Async.h"
 #include "Dom/JsonObject.h"
 #include "Engine/World.h"
@@ -40,9 +41,9 @@ void UBlenderGeometryNodesComponent::EnsureDefaults()
 		Subdivisions.DisplayName = TEXT("Hex Subdivisions");
 		Subdivisions.SocketName = TEXT("Hex Subdivisions");
 		Subdivisions.Type = EBlenderGNParameterType::Int;
-		Subdivisions.IntValue = 3;
+		Subdivisions.IntValue = 2;
 		Subdivisions.SliderMin = 1.0f;
-		Subdivisions.SliderMax = 3.0f;
+		Subdivisions.SliderMax = 2.0f;
 		Inputs.Add(Subdivisions);
 
 		FBlenderGNInput TileGap;
@@ -135,6 +136,7 @@ void UBlenderGeometryNodesComponent::PostEditChangeProperty(FPropertyChangedEven
 	MinimumRefreshInterval = FMath::Clamp(MinimumRefreshInterval, 0.02f, 2.0f);
 	FixedRefreshInterval = FMath::Clamp(FixedRefreshInterval, 0.1f, 10.0f);
 	BlenderFrameRate = FMath::Clamp(BlenderFrameRate, 1.0f, 60.0f);
+	PreviewAnimationFrameRate = FMath::Clamp(PreviewAnimationFrameRate, 1.0f, 120.0f);
 
 	if (RefreshMode == EBlenderGNRefreshMode::OnParameterChange)
 	{
@@ -207,18 +209,14 @@ void UBlenderGeometryNodesComponent::ApplyPreviewAnimation(double TimeSeconds)
 		return;
 	}
 
-	const double MinFrameInterval = 1.0 / FMath::Max(1.0f, PreviewAnimationFrameRate);
-	if (TimeSeconds - LastPreviewAnimationTime < MinFrameInterval)
+	const double MinFrameInterval = PreviewAnimationFrameRate >= 59.0f
+		? 0.0
+		: 1.0 / FMath::Clamp(PreviewAnimationFrameRate, 1.0f, 120.0f);
+	if (MinFrameInterval > 0.0 && TimeSeconds - LastPreviewAnimationTime < MinFrameInterval)
 	{
 		return;
 	}
 	LastPreviewAnimationTime = TimeSeconds;
-
-	EnsureFastDynamicMesh();
-	if (!FastDynamicMesh || FastDynamicMesh->GetVertexCount() != LastMeshData.Vertices.Num())
-	{
-		return;
-	}
 
 	if (PreviewVertexIsland.Num() != LastMeshData.Vertices.Num() || PreviewIslandNormals.Num() == 0 || PreviewIslandPhases.Num() == 0)
 	{
@@ -233,6 +231,21 @@ void UBlenderGeometryNodesComponent::ApplyPreviewAnimation(double TimeSeconds)
 	const float Speed = GetFloatInput(TEXT("Breath Speed"), 1.15f);
 	if (FMath::IsNearlyZero(Amplitude) || FMath::IsNearlyZero(Speed))
 	{
+		return;
+	}
+
+	if (FastDynamicMesh && FastDynamicMesh->IsIslandMotionEnabled() && FastDynamicMesh->GetVertexCount() == LastMeshData.Vertices.Num())
+	{
+		if (CachedProceduralMesh)
+		{
+			CachedProceduralMesh->SetVisibility(false);
+		}
+		DestroyPreviewIslandMeshes();
+		FastDynamicMesh->SetVisibility(true);
+		LastPreviewAnimationStatus = FString::Printf(
+			TEXT("GPU island motion: %d islands for subdivision %d"),
+			PreviewIslandNormals.Num(),
+			GetIntInput(TEXT("Hex Subdivisions"), 2));
 		return;
 	}
 
@@ -252,22 +265,75 @@ void UBlenderGeometryNodesComponent::ApplyPreviewAnimation(double TimeSeconds)
 		PreviewIslandOffsets[Island] = PreviewIslandNormals[Island] * (Shaped * AmpBlend);
 	}
 
-	const int32 VertexCount = LastMeshData.Vertices.Num();
-	if (PreviewAnimatedVertices.Num() != VertexCount)
+	if (!FastDynamicMesh || !FastDynamicMesh->IsIslandMotionEnabled() || FastDynamicMesh->GetVertexCount() != LastMeshData.Vertices.Num())
 	{
-		PreviewAnimatedVertices.SetNumUninitialized(VertexCount);
-	}
-	const FVector* RESTRICT BaseVerts = LastMeshData.Vertices.GetData();
-	const int32* RESTRICT Islands = PreviewVertexIsland.GetData();
-	const FVector* RESTRICT Offsets = PreviewIslandOffsets.GetData();
-	FVector* RESTRICT OutVerts = PreviewAnimatedVertices.GetData();
-	for (int32 Index = 0; Index < VertexCount; ++Index)
-	{
-		OutVerts[Index] = BaseVerts[Index] + Offsets[Islands[Index]];
+		AActor* Owner = GetOwner();
+		if (!Owner || !Owner->GetRootComponent())
+		{
+			return;
+		}
+
+		if (FastDynamicMesh)
+		{
+			FastDynamicMesh->DestroyComponent();
+			FastDynamicMesh = nullptr;
+		}
+
+		FastDynamicMesh = NewObject<UBlenderGNFastDynamicMeshComponent>(Owner, TEXT("BlenderGN_GpuIslandMotion"), RF_Transient);
+		FastDynamicMesh->SetupAttachment(Owner->GetRootComponent());
+
+		TArray<FColor> Colors;
+		Colors.Init(FColor(184, 184, 173, 255), LastMeshData.Vertices.Num());
+		FastDynamicMesh->InitIslandMotionMesh(
+			LastMeshData.Vertices,
+			LastMeshData.Triangles,
+			PreviewStableNormals.Num() == LastMeshData.Vertices.Num() ? PreviewStableNormals : LastMeshData.Normals,
+			LastMeshData.UVs,
+			Colors,
+			PreviewStableTangents,
+			PreviewVertexIsland,
+			PreviewIslandNormals,
+			PreviewIslandPhases,
+			Amplitude,
+			Speed,
+			Smoothness);
+
+		UMaterialInterface* Mat = nullptr;
+		if (bForceDefaultMaterial)
+		{
+			Mat = UMaterial::GetDefaultMaterial(MD_Surface);
+		}
+		else if (MaterialOverrides.Num() > 0 && MaterialOverrides[0])
+		{
+			Mat = MaterialOverrides[0];
+		}
+		else if (FallbackMaterial)
+		{
+			Mat = FallbackMaterial;
+		}
+		if (Mat)
+		{
+			FastDynamicMesh->SetMaterial(0, Mat);
+		}
+
+		FastDynamicMesh->SetCastShadow(false);
+		FastDynamicMesh->SetVisibility(true);
+		FastDynamicMesh->RegisterComponent();
+		LastPreviewAnimationStatus = FString::Printf(
+			TEXT("GPU island motion: %d islands for subdivision %d"),
+			PreviewIslandNormals.Num(),
+			GetIntInput(TEXT("Hex Subdivisions"), 2));
 	}
 
-	// Fast path: only upload position buffer to GPU
-	FastDynamicMesh->UpdatePositionsOnly(PreviewAnimatedVertices);
+	if (CachedProceduralMesh)
+	{
+		CachedProceduralMesh->SetVisibility(false);
+	}
+	DestroyPreviewIslandMeshes();
+	if (FastDynamicMesh)
+	{
+		FastDynamicMesh->SetVisibility(true);
+	}
 }
 
 void UBlenderGeometryNodesComponent::BuildPreviewAnimationCache()
@@ -275,10 +341,30 @@ void UBlenderGeometryNodesComponent::BuildPreviewAnimationCache()
 	PreviewVertexIsland.Reset();
 	PreviewIslandNormals.Reset();
 	PreviewIslandPhases.Reset();
+	LastPreviewIslandCount = 0;
+	LastPreviewAnimationStatus = TEXT("No mesh");
 
 	const int32 VertexCount = LastMeshData.Vertices.Num();
 	if (VertexCount == 0 || LastMeshData.Triangles.Num() == 0)
 	{
+		return;
+	}
+
+	BlenderGNProcMesh::FIslandMotionCache Cache;
+	const int32 HexSubdivisions = GetIntInput(TEXT("Hex Subdivisions"), 2);
+	const float NoiseScale = FMath::Max(0.2f, GetFloatInput(TEXT("Breath Noise Scale"), 1.75f));
+	if (BlenderGNProcMesh::BuildHexIslandMotionCache(LastMeshData, HexSubdivisions, NoiseScale, Cache))
+	{
+		PreviewVertexIsland = MoveTemp(Cache.VertexIsland);
+		PreviewIslandNormals = MoveTemp(Cache.IslandNormals);
+		PreviewIslandPhases = MoveTemp(Cache.IslandPhases);
+		PreviewAnimatedVertices = LastMeshData.Vertices;
+		PreviewAnimatedPositions.Reset();
+		LastPreviewIslandCount = PreviewIslandNormals.Num();
+		LastPreviewAnimationStatus = FString::Printf(
+			TEXT("Hex island cache: %d islands for subdivision %d"),
+			LastPreviewIslandCount,
+			HexSubdivisions);
 		return;
 	}
 
@@ -398,7 +484,6 @@ void UBlenderGeometryNodesComponent::BuildPreviewAnimationCache()
 		++IslandCounts[Island];
 	}
 
-	const float NoiseScale = FMath::Max(0.2f, GetFloatInput(TEXT("Breath Noise Scale"), 1.75f));
 	PreviewIslandNormals.SetNum(IslandCenters.Num());
 	PreviewIslandPhases.SetNum(IslandCenters.Num());
 	for (int32 Island = 0; Island < IslandCenters.Num(); ++Island)
@@ -410,6 +495,8 @@ void UBlenderGeometryNodesComponent::BuildPreviewAnimationCache()
 	}
 
 	PreviewAnimatedVertices = LastMeshData.Vertices;
+	LastPreviewIslandCount = PreviewIslandNormals.Num();
+	LastPreviewAnimationStatus = FString::Printf(TEXT("Fallback cache: %d connected components"), LastPreviewIslandCount);
 }
 
 void UBlenderGeometryNodesComponent::StartBackgroundRefresh(const FString& RequestHash)
@@ -635,6 +722,7 @@ void UBlenderGeometryNodesComponent::ApplyMeshData(const FBlenderGNMeshData& Mes
 	LastTriangleCount = LastMeshData.GetTriangleCount();
 	LastMeshCenter = FVector::ZeroVector;
 	LastPreviewAnimationTime = -999.0;
+	DestroyPreviewIslandMeshes();
 	if (LastMeshData.Vertices.Num() > 0)
 	{
 		for (const FVector& Vertex : LastMeshData.Vertices)
@@ -649,14 +737,10 @@ void UBlenderGeometryNodesComponent::ApplyMeshData(const FBlenderGNMeshData& Mes
 		&& (LastMeshData.Sections.Num() == PreviousSectionCount)
 		&& (PreviousVertexCount > 0);
 
-	if (!bTopologyUnchanged)
+	if (FastDynamicMesh)
 	{
-		BuildPreviewAnimationCache();
-		if (FastDynamicMesh)
-		{
-			FastDynamicMesh->DestroyComponent();
-			FastDynamicMesh = nullptr;
-		}
+		FastDynamicMesh->DestroyComponent();
+		FastDynamicMesh = nullptr;
 	}
 
 	UProceduralMeshComponent* ProceduralMesh = EnsureProceduralMesh();
@@ -688,6 +772,7 @@ void UBlenderGeometryNodesComponent::ApplyMeshData(const FBlenderGNMeshData& Mes
 		}
 	}
 	CalculateTangentsAlignedWithNormals(LastMeshData, PreviewStableNormals, PreviewStableTangents);
+	BuildPreviewAnimationCache();
 
 	if (bTopologyUnchanged)
 	{
@@ -769,14 +854,12 @@ void UBlenderGeometryNodesComponent::EnsureFastDynamicMesh()
 		return;
 	}
 
+	const bool bNeedsRegister = !FastDynamicMesh;
 	if (!FastDynamicMesh)
 	{
-		FastDynamicMesh = NewObject<UBlenderGNFastDynamicMeshComponent>(Owner, TEXT("BlenderGN_FastDynMesh"));
+		FastDynamicMesh = NewObject<UBlenderGNFastDynamicMeshComponent>(Owner, TEXT("BlenderGN_FastDynMesh"), RF_Transient);
 		FastDynamicMesh->SetupAttachment(Owner->GetRootComponent());
-		FastDynamicMesh->RegisterComponent();
-		Owner->AddInstanceComponent(FastDynamicMesh);
 	}
-
 	TArray<FColor> Colors;
 	Colors.Init(FColor(184, 184, 173, 255), LastMeshData.Vertices.Num());
 
@@ -789,7 +872,11 @@ void UBlenderGeometryNodesComponent::EnsureFastDynamicMesh()
 		PreviewStableTangents);
 
 	UMaterialInterface* Mat = nullptr;
-	if (MaterialOverrides.Num() > 0 && MaterialOverrides[0])
+	if (bForceDefaultMaterial)
+	{
+		Mat = UMaterial::GetDefaultMaterial(MD_Surface);
+	}
+	else if (MaterialOverrides.Num() > 0 && MaterialOverrides[0])
 	{
 		Mat = MaterialOverrides[0];
 	}
@@ -804,11 +891,172 @@ void UBlenderGeometryNodesComponent::EnsureFastDynamicMesh()
 
 	FastDynamicMesh->SetCastShadow(bCastShadows);
 	FastDynamicMesh->SetVisibility(true);
+	if (bNeedsRegister)
+	{
+		FastDynamicMesh->RegisterComponent();
+	}
+	else
+	{
+		FastDynamicMesh->MarkRenderStateDirty();
+		FastDynamicMesh->UpdateBounds();
+	}
 
 	if (CachedProceduralMesh)
 	{
 		CachedProceduralMesh->SetVisibility(false);
 	}
+}
+
+bool UBlenderGeometryNodesComponent::EnsurePreviewIslandMeshes()
+{
+	const int32 IslandCount = PreviewIslandNormals.Num();
+	if (IslandCount <= 0 || PreviewVertexIsland.Num() != LastMeshData.Vertices.Num())
+	{
+		return false;
+	}
+	if (PreviewIslandMeshes.Num() == IslandCount)
+	{
+		bool bAllValid = true;
+		for (UProceduralMeshComponent* IslandMesh : PreviewIslandMeshes)
+		{
+			bAllValid &= IsValid(IslandMesh);
+		}
+		if (bAllValid)
+		{
+			return true;
+		}
+		DestroyPreviewIslandMeshes();
+	}
+
+	AActor* Owner = GetOwner();
+	if (!Owner || !Owner->GetRootComponent())
+	{
+		return false;
+	}
+
+	TArray<TMap<int32, int32>> GlobalToLocal;
+	TArray<TArray<FVector>> IslandVertices;
+	TArray<TArray<int32>> IslandTriangles;
+	TArray<TArray<FVector>> IslandNormals;
+	TArray<TArray<FVector2D>> IslandUVs;
+	TArray<TArray<FLinearColor>> IslandColors;
+	TArray<TArray<FProcMeshTangent>> IslandTangents;
+	GlobalToLocal.SetNum(IslandCount);
+	IslandVertices.SetNum(IslandCount);
+	IslandTriangles.SetNum(IslandCount);
+	IslandNormals.SetNum(IslandCount);
+	IslandUVs.SetNum(IslandCount);
+	IslandColors.SetNum(IslandCount);
+	IslandTangents.SetNum(IslandCount);
+
+	auto AddVertexToIsland = [&](int32 Island, int32 GlobalIndex) -> int32
+	{
+		if (int32* Existing = GlobalToLocal[Island].Find(GlobalIndex))
+		{
+			return *Existing;
+		}
+
+		const int32 LocalIndex = IslandVertices[Island].Num();
+		GlobalToLocal[Island].Add(GlobalIndex, LocalIndex);
+		IslandVertices[Island].Add(LastMeshData.Vertices[GlobalIndex]);
+		IslandNormals[Island].Add(PreviewStableNormals.IsValidIndex(GlobalIndex) ? PreviewStableNormals[GlobalIndex] : FVector::UpVector);
+		IslandUVs[Island].Add(LastMeshData.UVs.IsValidIndex(GlobalIndex) ? LastMeshData.UVs[GlobalIndex] : FVector2D::ZeroVector);
+		IslandColors[Island].Add(FLinearColor(0.72f, 0.72f, 0.68f, 1.0f));
+		IslandTangents[Island].Add(PreviewStableTangents.IsValidIndex(GlobalIndex) ? PreviewStableTangents[GlobalIndex] : FProcMeshTangent(1.0f, 0.0f, 0.0f));
+		return LocalIndex;
+	};
+
+	for (int32 Index = 0; Index + 2 < LastMeshData.Triangles.Num(); Index += 3)
+	{
+		const int32 A = LastMeshData.Triangles[Index];
+		const int32 B = LastMeshData.Triangles[Index + 1];
+		const int32 C = LastMeshData.Triangles[Index + 2];
+		if (!PreviewVertexIsland.IsValidIndex(A) || !PreviewVertexIsland.IsValidIndex(B) || !PreviewVertexIsland.IsValidIndex(C))
+		{
+			continue;
+		}
+
+		const int32 Island = PreviewVertexIsland[A];
+		if (!IslandVertices.IsValidIndex(Island))
+		{
+			continue;
+		}
+
+		IslandTriangles[Island].Add(AddVertexToIsland(Island, A));
+		IslandTriangles[Island].Add(AddVertexToIsland(Island, B));
+		IslandTriangles[Island].Add(AddVertexToIsland(Island, C));
+	}
+
+	UMaterialInterface* Material = nullptr;
+	if (bForceDefaultMaterial)
+	{
+		Material = UMaterial::GetDefaultMaterial(MD_Surface);
+	}
+	else if (MaterialOverrides.Num() > 0 && MaterialOverrides[0])
+	{
+		Material = MaterialOverrides[0];
+	}
+	else if (FallbackMaterial)
+	{
+		Material = FallbackMaterial;
+	}
+	else
+	{
+		Material = UMaterial::GetDefaultMaterial(MD_Surface);
+	}
+
+	PreviewIslandMeshes.SetNum(IslandCount);
+	for (int32 Island = 0; Island < IslandCount; ++Island)
+	{
+		if (IslandVertices[Island].Num() == 0 || IslandTriangles[Island].Num() == 0)
+		{
+			DestroyPreviewIslandMeshes();
+			return false;
+		}
+
+		const FName ComponentName = MakeUniqueObjectName(Owner, UProceduralMeshComponent::StaticClass(), *FString::Printf(TEXT("BlenderGN_Island_%02d"), Island));
+		UProceduralMeshComponent* IslandMesh = NewObject<UProceduralMeshComponent>(Owner, ComponentName, RF_Transient);
+		IslandMesh->SetupAttachment(Owner->GetRootComponent());
+		IslandMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		IslandMesh->SetCastShadow(bCastShadows);
+		IslandMesh->CreateMeshSection_LinearColor(
+			0,
+			IslandVertices[Island],
+			IslandTriangles[Island],
+			IslandNormals[Island],
+			IslandUVs[Island],
+			IslandColors[Island],
+			IslandTangents[Island],
+			false);
+		if (Material)
+		{
+			IslandMesh->SetMaterial(0, Material);
+		}
+		IslandMesh->RegisterComponent();
+		PreviewIslandMeshes[Island] = IslandMesh;
+	}
+
+	if (CachedProceduralMesh)
+	{
+		CachedProceduralMesh->SetVisibility(false);
+	}
+	if (FastDynamicMesh)
+	{
+		FastDynamicMesh->SetVisibility(false);
+	}
+	return true;
+}
+
+void UBlenderGeometryNodesComponent::DestroyPreviewIslandMeshes()
+{
+	for (UProceduralMeshComponent* IslandMesh : PreviewIslandMeshes)
+	{
+		if (IsValid(IslandMesh))
+		{
+			IslandMesh->DestroyComponent();
+		}
+	}
+	PreviewIslandMeshes.Reset();
 }
 
 UProceduralMeshComponent* UBlenderGeometryNodesComponent::EnsureProceduralMesh()
@@ -890,7 +1138,7 @@ void UBlenderGeometryNodesComponent::SetIntInput(const FString& SocketName, int3
 	if (FBlenderGNInput* Input = FindInput(SocketName))
 	{
 		Input->Type = EBlenderGNParameterType::Int;
-		Input->IntValue = Input->MatchesName(TEXT("Hex Subdivisions")) ? FMath::Clamp(Value, 1, 3) : Value;
+		Input->IntValue = Input->MatchesName(TEXT("Hex Subdivisions")) ? FMath::Clamp(Value, 1, 2) : Value;
 		if (bRefresh)
 		{
 			RequestRefreshForParameterChange();

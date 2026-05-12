@@ -9,11 +9,13 @@ UBlenderGNWallNoiseMotionComponent::UBlenderGNWallNoiseMotionComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = true;
+	UpdateTickInterval();
 }
 
 void UBlenderGNWallNoiseMotionComponent::SetLiveMotion(bool bEnabled)
 {
 	bLiveMotion = bEnabled;
+	UpdateTickInterval();
 	SetComponentTickEnabled(bLiveMotion);
 }
 
@@ -34,6 +36,7 @@ void UBlenderGNWallNoiseMotionComponent::BeginPlay()
 	Super::BeginPlay();
 	BindRuntime();
 	RebuildCache();
+	UpdateTickInterval();
 	SetComponentTickEnabled(bLiveMotion);
 }
 
@@ -42,7 +45,13 @@ void UBlenderGNWallNoiseMotionComponent::TickComponent(float DeltaTime, ELevelTi
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 	if (bLiveMotion)
 	{
-		ApplyMotion(GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f);
+		const float WorldTimeSeconds = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0f;
+		const double UpdateInterval = 1.0 / FMath::Max(1.0f, MaxAnimationFrameRate);
+		if (WorldTimeSeconds - LastMotionUpdateTime >= UpdateInterval)
+		{
+			LastMotionUpdateTime = WorldTimeSeconds;
+			ApplyMotion(WorldTimeSeconds);
+		}
 	}
 }
 
@@ -86,7 +95,12 @@ void UBlenderGNWallNoiseMotionComponent::RebuildCache()
 
 	BaseVertices = BoundRuntime->GetLastMeshData().Vertices;
 	CachedVertexCount = BaseVertices.Num();
-	AnimatedVertices.SetNum(CachedVertexCount);
+	AnimatedVertices.SetNumUninitialized(CachedVertexCount);
+	AnimatedNormals.Reset();
+	if (bRecalculateAnimatedNormals)
+	{
+		AnimatedNormals.Reserve(CachedVertexCount);
+	}
 	NormalGroups = BlenderGNProcMesh::BuildPositionGroups(BaseVertices, PositionMergeQuantization);
 	SyncFromRuntimeInputs();
 }
@@ -101,6 +115,11 @@ void UBlenderGNWallNoiseMotionComponent::SyncFromRuntimeInputs()
 	Strength = FMath::Clamp(BoundRuntime->GetFloatInput(TEXT("Noise Strength"), Strength), 0.0f, 150.0f);
 	Speed = FMath::Clamp(BoundRuntime->GetFloatInput(TEXT("Wave Speed"), Speed), -5.0f, 5.0f);
 	Scale = FMath::Clamp(BoundRuntime->GetFloatInput(TEXT("Noise Scale"), Scale), 0.1f, 12.0f);
+}
+
+void UBlenderGNWallNoiseMotionComponent::UpdateTickInterval()
+{
+	PrimaryComponentTick.TickInterval = 1.0f / FMath::Max(1.0f, MaxAnimationFrameRate);
 }
 
 void UBlenderGNWallNoiseMotionComponent::ApplyMotion(float WorldTimeSeconds)
@@ -137,14 +156,13 @@ void UBlenderGNWallNoiseMotionComponent::ApplyMotion(float WorldTimeSeconds)
 		AnimatedVertices[Index] = BlenderGNProcMesh::ApplyAxisOffset(V, Axis, Wave * Amplitude);
 	}
 
-	TArray<FVector> Normals;
 	if (bRecalculateAnimatedNormals)
 	{
-		BlenderGNProcMesh::RecalculateNormals(BoundRuntime->GetLastMeshData(), AnimatedVertices, Normals);
+		BlenderGNProcMesh::RecalculateNormals(BoundRuntime->GetLastMeshData(), AnimatedVertices, AnimatedNormals);
 		if (bSmoothSplitNormals)
 		{
-			BlenderGNProcMesh::SmoothNormalsByGroups(NormalGroups, SmoothingAngle, Normals);
+			BlenderGNProcMesh::SmoothNormalsByGroups(NormalGroups, SmoothingAngle, AnimatedNormals);
 		}
 	}
-	BlenderGNProcMesh::ApplyVertices(BoundRuntime, AnimatedVertices, Normals);
+	BlenderGNProcMesh::ApplyVertices(BoundRuntime, AnimatedVertices, AnimatedNormals, ScratchVertexColors, ScratchTangents);
 }

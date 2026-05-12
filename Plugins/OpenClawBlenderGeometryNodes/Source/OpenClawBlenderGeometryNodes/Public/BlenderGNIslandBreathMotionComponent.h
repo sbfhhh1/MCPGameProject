@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "ProceduralMeshComponent.h"
 #include "BlenderGNIslandBreathMotionComponent.generated.h"
 
 class UBlenderGeometryNodesComponent;
@@ -33,6 +34,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float Smoothness = 0.72f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "1.0", ClampMax = "120.0"))
+	float MaxAnimationFrameRate = 30.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance")
+	bool bRecalculateAnimatedNormals = false;
+
 	UFUNCTION(BlueprintCallable, Category = "Motion")
 	void SetLiveMotion(bool bEnabled);
 
@@ -48,10 +55,15 @@ private:
 
 	TArray<FVector> BaseVertices;
 	TArray<FVector> AnimatedVertices;
+	TArray<FVector> AnimatedNormals;
+	TArray<FLinearColor> ScratchVertexColors;
+	TArray<FProcMeshTangent> ScratchTangents;
 	TArray<FVector> IslandNormals;
+	TArray<FVector> IslandOffsets;
 	TArray<float> IslandPhases;
 	TArray<int32> VertexIsland;
 	int32 CachedVertexCount = -1;
+	double LastMotionUpdateTime = -999.0;
 
 	UFUNCTION()
 	void HandleMeshUpdated(UProceduralMeshComponent* ProceduralMesh);
@@ -60,5 +72,6 @@ private:
 	void UnbindRuntime();
 	void RebuildCache();
 	void BuildIslands();
+	void UpdateTickInterval();
 	void ApplyMotion(float WorldTimeSeconds);
 };

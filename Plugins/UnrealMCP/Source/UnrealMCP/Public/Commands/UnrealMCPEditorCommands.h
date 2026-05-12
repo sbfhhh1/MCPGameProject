@@ -39,6 +39,7 @@ private:
     TSharedPtr<FJsonObject> HandleOpenClawGNConfigureRefresh(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleOpenClawGNGetStatus(const TSharedPtr<FJsonObject>& Params);
     TSharedPtr<FJsonObject> HandleOpenClawGNDumpMeshDebug(const TSharedPtr<FJsonObject>& Params);
+    TSharedPtr<FJsonObject> HandleSaveAll(const TSharedPtr<FJsonObject>& Params);
 
     // Level management
     TSharedPtr<FJsonObject> HandleOpenLevel(const TSharedPtr<FJsonObject>& Params);

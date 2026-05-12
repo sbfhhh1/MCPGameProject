@@ -27,7 +27,7 @@ public:
 	{
 		const uint32 Size = Positions.Num() * sizeof(FVector3f);
 		FRHIResourceCreateInfo CreateInfo(TEXT("BlenderGN_DynPosVB"));
-		VertexBufferRHI = RHICmdList.CreateBuffer(Size, BUF_Static | BUF_VertexBuffer | BUF_ShaderResource, sizeof(FVector3f), ERHIAccess::VertexOrIndexBuffer | ERHIAccess::SRVMask, CreateInfo);
+		VertexBufferRHI = RHICmdList.CreateBuffer(Size, BUF_Dynamic | BUF_VertexBuffer | BUF_ShaderResource, sizeof(FVector3f), ERHIAccess::VertexOrIndexBuffer | ERHIAccess::SRVMask, CreateInfo);
 		void* Data = RHICmdList.LockBuffer(VertexBufferRHI, 0, Size, RLM_WriteOnly);
 		FMemory::Memcpy(Data, Positions.GetData(), Size);
 		RHICmdList.UnlockBuffer(VertexBufferRHI);
@@ -53,7 +53,11 @@ public:
 	FBlenderGNFastMeshSceneProxy(UBlenderGNFastDynamicMeshComponent* Component,
 		TArray<FVector3f>&& InPositions,
 		TArray<FDynamicMeshVertex>&& InStaticVerts,
-		TArray<uint32>&& InIndices)
+		TArray<uint32>&& InIndices,
+		TArray<FBlenderGNFastIslandBatch>&& InIslandBatches,
+		float InMotionAmplitude,
+		float InMotionSpeed,
+		float InMotionSmoothness)
 		: FPrimitiveSceneProxy(Component)
 		, Material(Component->GetMaterial(0) ? Component->GetMaterial(0) : UMaterial::GetDefaultMaterial(MD_Surface))
 		, MaterialRelevance(Component->GetMaterialRelevance(GetScene().GetShaderPlatform()))
@@ -61,6 +65,10 @@ public:
 		, Positions(MoveTemp(InPositions))
 		, StaticVerts(MoveTemp(InStaticVerts))
 		, Indices(MoveTemp(InIndices))
+		, IslandBatches(MoveTemp(InIslandBatches))
+		, MotionAmplitude(InMotionAmplitude)
+		, MotionSpeed(InMotionSpeed)
+		, MotionSmoothness(InMotionSmoothness)
 		, NumVertices(Positions.Num())
 		, NumPrimitives(Indices.Num() / 3)
 	{
@@ -138,16 +146,9 @@ public:
 			return;
 		}
 		const uint32 Size = NumVertices * sizeof(FVector3f);
-		FRHIResourceCreateInfo CreateInfo(TEXT("BlenderGN_DynPosVB"));
-		DynPositionVB.VertexBufferRHI = RHICmdList.CreateBuffer(Size, BUF_Static | BUF_VertexBuffer | BUF_ShaderResource, sizeof(FVector3f), ERHIAccess::VertexOrIndexBuffer | ERHIAccess::SRVMask, CreateInfo);
 		void* Data = RHICmdList.LockBuffer(DynPositionVB.VertexBufferRHI, 0, Size, RLM_WriteOnly);
 		FMemory::Memcpy(Data, NewPositions.GetData(), Size);
 		RHICmdList.UnlockBuffer(DynPositionVB.VertexBufferRHI);
-		DynPositionVB.SRV = RHICmdList.CreateShaderResourceView(
-			DynPositionVB.VertexBufferRHI,
-			FRHIViewDesc::CreateBufferSRV()
-				.SetType(FRHIViewDesc::EBufferType::Typed)
-				.SetFormat(PF_R32_FLOAT));
 	}
 
 	virtual void GetDynamicMeshElements(const TArray<const FSceneView*>& Views, const FSceneViewFamily& ViewFamily, uint32 VisibilityMap, FMeshElementCollector& Collector) const override
@@ -164,6 +165,46 @@ public:
 				continue;
 			}
 
+			if (IslandBatches.Num() > 0)
+			{
+				for (const FBlenderGNFastIslandBatch& IslandBatch : IslandBatches)
+				{
+					if (IslandBatch.NumPrimitives == 0)
+					{
+						continue;
+					}
+
+					const float Wave = FMath::Sin(static_cast<float>(ViewFamily.Time.GetWorldTimeSeconds()) * MotionSpeed + IslandBatch.Phase);
+					const float Shaped = FMath::Lerp(Wave, FMath::SmoothStep(-1.0f, 1.0f, Wave), MotionSmoothness);
+					const float Blend = FMath::Lerp(1.0f, 0.35f, MotionSmoothness);
+					const FVector Offset = FVector(IslandBatch.Normal) * (Shaped * MotionAmplitude * Blend);
+					const FMatrix IslandLocalToWorld = FTranslationMatrix(Offset) * GetLocalToWorld();
+
+					FMeshBatch& Mesh = Collector.AllocateMesh();
+					Mesh.VertexFactory = &VertexFactory;
+					Mesh.MaterialRenderProxy = Material->GetRenderProxy();
+					Mesh.ReverseCulling = IsLocalToWorldDeterminantNegative();
+					Mesh.Type = PT_TriangleList;
+					Mesh.DepthPriorityGroup = SDPG_World;
+					Mesh.bCanApplyViewModeOverrides = true;
+					Mesh.CastShadow = false;
+
+					FMeshBatchElement& Element = Mesh.Elements[0];
+					Element.IndexBuffer = &IB;
+					Element.FirstIndex = IslandBatch.FirstIndex;
+					Element.NumPrimitives = IslandBatch.NumPrimitives;
+					Element.MinVertexIndex = 0;
+					Element.MaxVertexIndex = NumVertices - 1;
+
+					FDynamicPrimitiveUniformBuffer& DynamicPrimitiveUniformBuffer = Collector.AllocateOneFrameResource<FDynamicPrimitiveUniformBuffer>();
+					DynamicPrimitiveUniformBuffer.Set(Collector.GetRHICommandList(), IslandLocalToWorld, IslandLocalToWorld, GetBounds(), GetLocalBounds(), true, false, AlwaysHasVelocity());
+					Element.PrimitiveUniformBufferResource = &DynamicPrimitiveUniformBuffer.UniformBuffer;
+
+					Collector.AddMesh(ViewIndex, Mesh);
+				}
+				continue;
+			}
+
 			FMeshBatch& Mesh = Collector.AllocateMesh();
 			Mesh.VertexFactory = &VertexFactory;
 			Mesh.MaterialRenderProxy = Material->GetRenderProxy();
@@ -171,7 +212,7 @@ public:
 			Mesh.Type = PT_TriangleList;
 			Mesh.DepthPriorityGroup = SDPG_World;
 			Mesh.bCanApplyViewModeOverrides = true;
-			Mesh.CastShadow = true;
+			Mesh.CastShadow = IsShadowCast(Views[ViewIndex]);
 
 			FMeshBatchElement& Element = Mesh.Elements[0];
 			Element.IndexBuffer = &IB;
@@ -188,7 +229,7 @@ public:
 	{
 		FPrimitiveViewRelevance Result;
 		Result.bDrawRelevance = IsShown(View);
-		Result.bShadowRelevance = IsShadowCast(View);
+		Result.bShadowRelevance = IsShadowCast(View) && IslandBatches.Num() == 0;
 		Result.bDynamicRelevance = true;
 		Result.bRenderInMainPass = ShouldRenderInMainPass();
 		Result.bUsesLightingChannels = GetLightingChannelMask() != GetDefaultLightingChannelMask();
@@ -216,6 +257,10 @@ private:
 	TArray<FVector3f> Positions;
 	TArray<FDynamicMeshVertex> StaticVerts;
 	TArray<uint32> Indices;
+	TArray<FBlenderGNFastIslandBatch> IslandBatches;
+	float MotionAmplitude;
+	float MotionSpeed;
+	float MotionSmoothness;
 	int32 NumVertices;
 	int32 NumPrimitives;
 };
@@ -237,6 +282,10 @@ void UBlenderGNFastDynamicMeshComponent::InitMesh(
 {
 	const int32 NumVerts = Vertices.Num();
 	CachedVertexCount = NumVerts;
+	IslandBatches.Reset();
+	MotionAmplitude = 0.0f;
+	MotionSpeed = 1.0f;
+	MotionSmoothness = 0.0f;
 
 	// Build position buffer (FVector3f)
 	PositionBuffer.SetNumUninitialized(NumVerts);
@@ -246,7 +295,8 @@ void UBlenderGNFastDynamicMeshComponent::InitMesh(
 		PositionBuffer[i] = FVector3f(Vertices[i]);
 		MeshBounds += Vertices[i];
 	}
-	LocalBounds = MeshBounds;
+	const float BoundsPadding = FMath::Max(50.0f, MeshBounds.GetExtent().GetMax() * 0.1f);
+	LocalBounds = MeshBounds.ExpandBy(BoundsPadding);
 
 	// Build normals
 	NormalBuffer.SetNumUninitialized(NumVerts);
@@ -299,6 +349,76 @@ void UBlenderGNFastDynamicMeshComponent::InitMesh(
 	UpdateBounds();
 }
 
+void UBlenderGNFastDynamicMeshComponent::InitIslandMotionMesh(
+	const TArray<FVector>& Vertices,
+	const TArray<int32>& Triangles,
+	const TArray<FVector>& Normals,
+	const TArray<FVector2D>& UVs,
+	const TArray<FColor>& Colors,
+	const TArray<FProcMeshTangent>& Tangents,
+	const TArray<int32>& VertexIsland,
+	const TArray<FVector>& IslandNormals,
+	const TArray<float>& IslandPhases,
+	float Amplitude,
+	float Speed,
+	float Smoothness)
+{
+	InitMesh(Vertices, Triangles, Normals, UVs, Colors, Tangents);
+
+	const int32 IslandCount = IslandNormals.Num();
+	if (IslandCount <= 0 || VertexIsland.Num() != Vertices.Num())
+	{
+		return;
+	}
+
+	TArray<TArray<uint32>> IndicesByIsland;
+	IndicesByIsland.SetNum(IslandCount);
+	for (int32 Index = 0; Index + 2 < Triangles.Num(); Index += 3)
+	{
+		const int32 A = Triangles[Index];
+		const int32 B = Triangles[Index + 1];
+		const int32 C = Triangles[Index + 2];
+		if (!VertexIsland.IsValidIndex(A) || !VertexIsland.IsValidIndex(B) || !VertexIsland.IsValidIndex(C))
+		{
+			continue;
+		}
+
+		const int32 Island = VertexIsland[A];
+		if (!IndicesByIsland.IsValidIndex(Island))
+		{
+			continue;
+		}
+
+		IndicesByIsland[Island].Add(static_cast<uint32>(A));
+		IndicesByIsland[Island].Add(static_cast<uint32>(B));
+		IndicesByIsland[Island].Add(static_cast<uint32>(C));
+	}
+
+	IndexBuffer.Reset();
+	IslandBatches.Reset();
+	for (int32 Island = 0; Island < IslandCount; ++Island)
+	{
+		const TArray<uint32>& IslandIndices = IndicesByIsland[Island];
+		if (IslandIndices.Num() < 3)
+		{
+			continue;
+		}
+
+		FBlenderGNFastIslandBatch& Batch = IslandBatches.AddDefaulted_GetRef();
+		Batch.FirstIndex = static_cast<uint32>(IndexBuffer.Num());
+		Batch.NumPrimitives = static_cast<uint32>(IslandIndices.Num() / 3);
+		Batch.Normal = FVector3f(IslandNormals[Island].GetSafeNormal());
+		Batch.Phase = IslandPhases.IsValidIndex(Island) ? IslandPhases[Island] : 0.0f;
+		IndexBuffer.Append(IslandIndices);
+	}
+
+	MotionAmplitude = Amplitude;
+	MotionSpeed = FMath::Max(0.0f, Speed);
+	MotionSmoothness = FMath::Clamp(Smoothness, 0.0f, 1.0f);
+	MarkRenderStateDirty();
+	UpdateBounds();
+}
+
 void UBlenderGNFastDynamicMeshComponent::UpdatePositionsOnly(const TArray<FVector>& NewPositions)
 {
 	if (NewPositions.Num() != CachedVertexCount)
@@ -306,21 +426,37 @@ void UBlenderGNFastDynamicMeshComponent::UpdatePositionsOnly(const TArray<FVecto
 		return;
 	}
 
-	// Update CPU-side position buffer
-	FBox NewBounds(ForceInit);
 	for (int32 i = 0; i < CachedVertexCount; ++i)
 	{
 		PositionBuffer[i] = FVector3f(NewPositions[i]);
-		NewBounds += NewPositions[i];
 	}
-	LocalBounds = NewBounds;
-	UpdateBounds();
 
 	// Send only positions to render thread
 	FBlenderGNFastMeshSceneProxy* Proxy = static_cast<FBlenderGNFastMeshSceneProxy*>(SceneProxy);
 	if (Proxy)
 	{
 		TArray<FVector3f> PositionsCopy = PositionBuffer;
+		ENQUEUE_RENDER_COMMAND(UpdateBlenderGNPositions)(
+			[Proxy, Positions = MoveTemp(PositionsCopy)](FRHICommandListImmediate& RHICmdList)
+			{
+				Proxy->UpdatePositions_RenderThread(RHICmdList, Positions);
+			});
+	}
+}
+
+void UBlenderGNFastDynamicMeshComponent::UpdatePositionsOnly(const TArray<FVector3f>& NewPositions)
+{
+	if (NewPositions.Num() != CachedVertexCount)
+	{
+		return;
+	}
+
+	FMemory::Memcpy(PositionBuffer.GetData(), NewPositions.GetData(), CachedVertexCount * sizeof(FVector3f));
+
+	FBlenderGNFastMeshSceneProxy* Proxy = static_cast<FBlenderGNFastMeshSceneProxy*>(SceneProxy);
+	if (Proxy)
+	{
+		TArray<FVector3f> PositionsCopy = NewPositions;
 		ENQUEUE_RENDER_COMMAND(UpdateBlenderGNPositions)(
 			[Proxy, Positions = MoveTemp(PositionsCopy)](FRHICommandListImmediate& RHICmdList)
 			{
@@ -353,7 +489,16 @@ FPrimitiveSceneProxy* UBlenderGNFastDynamicMeshComponent::CreateSceneProxy()
 	TArray<FVector3f> PosCopy = PositionBuffer;
 	TArray<uint32> IdxCopy = IndexBuffer;
 
-	return new FBlenderGNFastMeshSceneProxy(this, MoveTemp(PosCopy), MoveTemp(DynVerts), MoveTemp(IdxCopy));
+	TArray<FBlenderGNFastIslandBatch> IslandBatchCopy = IslandBatches;
+	return new FBlenderGNFastMeshSceneProxy(
+		this,
+		MoveTemp(PosCopy),
+		MoveTemp(DynVerts),
+		MoveTemp(IdxCopy),
+		MoveTemp(IslandBatchCopy),
+		MotionAmplitude,
+		MotionSpeed,
+		MotionSmoothness);
 }
 
 FBoxSphereBounds UBlenderGNFastDynamicMeshComponent::CalcBounds(const FTransform& LocalToWorld) const

@@ -25,6 +25,7 @@
 #include "Misc/Paths.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
+#include "EditorAssetLibrary.h"
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
 {
@@ -94,6 +95,10 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("openclaw_gn_dump_mesh_debug"))
     {
         return HandleOpenClawGNDumpMeshDebug(Params);
+    }
+    else if (CommandType == TEXT("save_all"))
+    {
+        return HandleSaveAll(Params);
     }
     else if (CommandType == TEXT("open_level"))
     {
@@ -815,6 +820,23 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleFocusViewport(const TSha
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to get active viewport"));
     }
 
+    const bool bHasRealtime = Params->HasField(TEXT("realtime"));
+    const FText MCPRealtimeOverrideName = FText::FromString(TEXT("UnrealMCP Realtime Viewport"));
+    if (bHasRealtime)
+    {
+        const bool bRealtime = Params->GetBoolField(TEXT("realtime"));
+        for (FLevelEditorViewportClient* Client : GEditor->GetLevelViewportClients())
+        {
+            if (!Client || !Client->Viewport)
+            {
+                continue;
+            }
+            Client->RemoveRealtimeOverride(MCPRealtimeOverrideName, false);
+            Client->SetRealtime(bRealtime);
+            Client->AddRealtimeOverride(bRealtime, MCPRealtimeOverrideName);
+        }
+    }
+
     // If we have a target actor, focus on it
     if (HasTargetActor)
     {
@@ -861,6 +883,7 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleFocusViewport(const TSha
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("success"), true);
+    ResultObj->SetBoolField(TEXT("realtime"), ViewportClient->IsRealtime());
     return ResultObj;
 }
 
@@ -1000,6 +1023,18 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenClawGNConfigureRefre
     {
         Component->SidecarScriptPath = StringValue;
     }
+    if (Params->TryGetStringField(TEXT("fallback_material"), StringValue))
+    {
+        Component->FallbackMaterial = Cast<UMaterialInterface>(UEditorAssetLibrary::LoadAsset(StringValue));
+    }
+    if (Params->HasField(TEXT("clear_fallback_material")) && Params->GetBoolField(TEXT("clear_fallback_material")))
+    {
+        Component->FallbackMaterial = nullptr;
+    }
+    if (Params->HasField(TEXT("clear_material_overrides")) && Params->GetBoolField(TEXT("clear_material_overrides")))
+    {
+        Component->MaterialOverrides.Reset();
+    }
     if (Params->HasField(TEXT("timeout_seconds")))
     {
         Component->BlenderTimeoutSeconds = FMath::Clamp(static_cast<int32>(Params->GetNumberField(TEXT("timeout_seconds"))), 1, 120);
@@ -1062,6 +1097,11 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenClawGNConfigureRefre
     if (Params->HasField(TEXT("force_default_material")))
     {
         Component->bForceDefaultMaterial = Params->GetBoolField(TEXT("force_default_material"));
+        if (Component->bForceDefaultMaterial)
+        {
+            Component->FallbackMaterial = nullptr;
+            Component->MaterialOverrides.Reset();
+        }
     }
     if (Params->HasField(TEXT("invert_shading_normals")))
     {
@@ -1119,6 +1159,9 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenClawGNConfigureRefre
     ResultObj->SetBoolField(TEXT("invert_shading_normals"), Component->bInvertShadingNormals);
     ResultObj->SetBoolField(TEXT("enable_preview_animation"), Component->bEnablePreviewAnimation);
     ResultObj->SetNumberField(TEXT("preview_animation_frame_rate"), Component->PreviewAnimationFrameRate);
+    ResultObj->SetNumberField(TEXT("hex_subdivisions"), Component->GetIntInput(TEXT("Hex Subdivisions"), 2));
+    ResultObj->SetNumberField(TEXT("preview_islands"), Component->LastPreviewIslandCount);
+    ResultObj->SetStringField(TEXT("preview_animation_status"), Component->LastPreviewAnimationStatus);
     return ResultObj;
 }
 
@@ -1164,6 +1207,9 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenClawGNGetStatus(cons
     ResultObj->SetBoolField(TEXT("invert_shading_normals"), Component->bInvertShadingNormals);
     ResultObj->SetBoolField(TEXT("enable_preview_animation"), Component->bEnablePreviewAnimation);
     ResultObj->SetNumberField(TEXT("preview_animation_frame_rate"), Component->PreviewAnimationFrameRate);
+    ResultObj->SetNumberField(TEXT("hex_subdivisions"), Component->GetIntInput(TEXT("Hex Subdivisions"), 2));
+    ResultObj->SetNumberField(TEXT("preview_islands"), Component->LastPreviewIslandCount);
+    ResultObj->SetStringField(TEXT("preview_animation_status"), Component->LastPreviewAnimationStatus);
     return ResultObj;
 }
 
@@ -1249,6 +1295,16 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleOpenClawGNDumpMeshDebug(
         ResultObj->SetStringField(TEXT("output_path"), FPaths::ConvertRelativePathToFull(OutputPath));
     }
 
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSaveAll(const TSharedPtr<FJsonObject>& Params)
+{
+    bool bNeededSaving = false;
+    const bool bSuccess = FEditorFileUtils::SaveDirtyPackages(false, true, true, false, false, false, &bNeededSaving);
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), bSuccess);
+    ResultObj->SetBoolField(TEXT("needed_saving"), bNeededSaving);
     return ResultObj;
 }
 

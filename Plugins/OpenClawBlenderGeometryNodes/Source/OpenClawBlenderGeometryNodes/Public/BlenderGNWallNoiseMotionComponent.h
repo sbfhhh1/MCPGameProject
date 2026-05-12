@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "ProceduralMeshComponent.h"
 #include "BlenderGNWallNoiseMotionComponent.generated.h"
 
 class UBlenderGeometryNodesComponent;
@@ -44,8 +45,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Motion", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float Smoothness = 0.55f;
 
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Performance", meta = (ClampMin = "1.0", ClampMax = "120.0"))
+	float MaxAnimationFrameRate = 30.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Normals")
-	bool bRecalculateAnimatedNormals = true;
+	bool bRecalculateAnimatedNormals = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Normals")
 	bool bSmoothSplitNormals = true;
@@ -71,8 +75,12 @@ private:
 
 	TArray<FVector> BaseVertices;
 	TArray<FVector> AnimatedVertices;
+	TArray<FVector> AnimatedNormals;
+	TArray<FLinearColor> ScratchVertexColors;
+	TArray<FProcMeshTangent> ScratchTangents;
 	TArray<TArray<int32>> NormalGroups;
 	int32 CachedVertexCount = -1;
+	double LastMotionUpdateTime = -999.0;
 
 	UFUNCTION()
 	void HandleMeshUpdated(UProceduralMeshComponent* ProceduralMesh);
@@ -81,5 +89,6 @@ private:
 	void UnbindRuntime();
 	void RebuildCache();
 	void SyncFromRuntimeInputs();
+	void UpdateTickInterval();
 	void ApplyMotion(float WorldTimeSeconds);
 };

@@ -98,23 +98,29 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Output")
 	float BlenderToUnrealScale = 100.0f;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "Status")
 	bool bIsRunning = false;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "Status")
 	bool bHasPendingRefresh = false;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "Status")
 	FString LastStatus = TEXT("Idle");
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "Status")
 	float LastEvaluationSeconds = 0.0f;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "Status")
 	int32 LastVertexCount = 0;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "Status")
 	int32 LastTriangleCount = 0;
+
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+	int32 LastPreviewIslandCount = 0;
+
+	UPROPERTY(Transient, VisibleAnywhere, BlueprintReadOnly, Category = "Status")
+	FString LastPreviewAnimationStatus = TEXT("Not built");
 
 	UPROPERTY(BlueprintAssignable, Category = "Geometry Nodes")
 	FBlenderGNMeshUpdatedSignature OnMeshUpdated;
@@ -187,6 +193,9 @@ private:
 	TObjectPtr<UBlenderGNFastDynamicMeshComponent> FastDynamicMesh;
 
 	UPROPERTY(Transient)
+	TArray<TObjectPtr<UProceduralMeshComponent>> PreviewIslandMeshes;
+
+	UPROPERTY(Transient)
 	FBlenderGNMeshData LastMeshData;
 
 	UPROPERTY(Transient)
@@ -206,6 +215,8 @@ private:
 
 	UPROPERTY(Transient)
 	TArray<FVector> PreviewAnimatedVertices;
+
+	TArray<FVector3f> PreviewAnimatedPositions;
 
 	UPROPERTY(Transient)
 	TArray<FVector> PreviewStableNormals;
@@ -228,6 +239,8 @@ private:
 	void ApplyPreviewAnimation(double TimeSeconds);
 	void BuildPreviewAnimationCache();
 	void EnsureFastDynamicMesh();
+	bool EnsurePreviewIslandMeshes();
+	void DestroyPreviewIslandMeshes();
 	UProceduralMeshComponent* EnsureProceduralMesh();
 	FBlenderGNInput* FindInput(const FString& SocketName);
 	const FBlenderGNInput* FindInput(const FString& SocketName) const;

@@ -170,8 +170,8 @@ def try_apply_builtin_node_override(node_group, item):
     if socket_name != "Hex Subdivisions":
         return False
 
-    value = int(item.get("value", 3))
-    value = max(1, min(3, value))
+    value = int(item.get("value", 2))
+    value = max(1, min(2, value))
     changed = False
     for node in node_group.nodes:
         if node.bl_idname != "GeometryNodeMeshIcoSphere":
