@@ -1,8 +1,11 @@
-# Unreal Engine generated folders
-Binaries/
-DerivedDataCache/
-Intermediate/
-Saved/
+# Unreal Engine generated folders (recursive)
+**/Binaries/
+**/DerivedDataCache/
+**/Intermediate/
+**/Saved/
+
+# Build output per-plugin and per-project
+Build/
 
 # IDE/editor state
 .vs/
@@ -36,7 +39,18 @@ node_modules/
 
 # Local screenshots and verification artifacts
 Screenshots/
-*.png
+
+# Large third-party binaries (re-downloadable)
+# Substance plugin native libs (installer provides these)
+Plugins/Runtime/Substance/Libs/
+# SocketIOClient is 700MB mostly Binaries/Intermediate, source only is fine
+# But since Binaries/Intermediate are already excluded above, no extra rule needed
+
+# FBX source art (large, can be re-exported)
+# *.fbx
+
+# UE cooked/packaged data
+.egstore/
 
 # OS noise
 Thumbs.db
