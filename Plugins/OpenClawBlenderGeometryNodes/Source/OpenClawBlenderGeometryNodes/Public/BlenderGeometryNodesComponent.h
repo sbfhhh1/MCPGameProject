@@ -59,7 +59,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Refresh")
 	bool bUseBinaryMeshCache = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry Nodes", meta = (TitleProperty = "SocketName"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Geometry Nodes", meta = (TitleProperty = "DisplayName"))
 	TArray<FBlenderGNInput> Inputs;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Animation")
@@ -166,6 +166,8 @@ public:
 	FBlenderGNMeshData& GetMutableLastMeshData() { return LastMeshData; }
 	void ApplyMeshData(const FBlenderGNMeshData& MeshData);
 	void ReapplyLastMeshData();
+	bool RestoreLastMeshDataFromProceduralMesh();
+	void DisablePreviewAnimationMeshes();
 	struct FEvalResult
 	{
 		bool bSuccess = false;
@@ -236,6 +238,7 @@ private:
 	double QueuedRefreshTime = 0.0;
 
 	void EnsureDefaults();
+	bool BuildMeshDataFromProceduralMesh(const UProceduralMeshComponent* ProceduralMesh, FBlenderGNMeshData& OutMeshData) const;
 	void RequestRefreshForParameterChange();
 	void ApplyPreviewAnimation(double TimeSeconds);
 	void BuildPreviewAnimationCache();

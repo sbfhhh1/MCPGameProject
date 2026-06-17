@@ -1,5 +1,6 @@
 #include "BlenderGeometryNodesComponent.h"
 
+#include "BlenderGNGradientBoxMotionComponent.h"
 #include "BlenderGNProceduralMeshUtils.h"
 #include "Async/Async.h"
 #include "Dom/JsonObject.h"
@@ -45,7 +46,7 @@ bool IsHexSphereRuntimeInputSet(const TArray<FBlenderGNInput>& Inputs)
 		}
 	}
 
-	return HexSubdivisionNameCount > 1;
+	return HexSubdivisionNameCount > 0;
 }
 }
 
@@ -130,11 +131,11 @@ void UBlenderGeometryNodesComponent::EnsureDefaults()
 	{
 		if (Input.SocketName.IsEmpty())
 		{
-			Input.SocketName = Input.DisplayName;
+			Input.SocketName = !Input.DisplayName.IsEmpty() ? Input.DisplayName : Input.FallbackIdentifier;
 		}
-		if (!Input.SocketName.IsEmpty())
+		if (Input.DisplayName.IsEmpty())
 		{
-			Input.DisplayName = Input.SocketName;
+			Input.DisplayName = !Input.SocketName.IsEmpty() ? Input.SocketName : Input.FallbackIdentifier;
 		}
 	}
 }
@@ -158,6 +159,10 @@ void UBlenderGeometryNodesComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	EnsureDefaults();
+	if (LastMeshData.Vertices.Num() == 0)
+	{
+		RestoreLastMeshDataFromProceduralMesh();
+	}
 	if (bRefreshOnBeginPlay)
 	{
 		RefreshNow();
@@ -274,6 +279,15 @@ void UBlenderGeometryNodesComponent::RequestRefreshForParameterChange()
 
 void UBlenderGeometryNodesComponent::ApplyPreviewAnimation(double TimeSeconds)
 {
+	if (AActor* Owner = GetOwner())
+	{
+		if (Owner->FindComponentByClass<UBlenderGNGradientBoxMotionComponent>())
+		{
+			LastPreviewAnimationStatus = TEXT("Gradient Box local motion component owns preview animation.");
+			return;
+		}
+	}
+
 	if (!bEnablePreviewAnimation || LastMeshData.Vertices.Num() == 0 || LastMeshData.Sections.Num() == 0)
 	{
 		return;
@@ -921,6 +935,54 @@ void UBlenderGeometryNodesComponent::ReapplyLastMeshData()
 	ApplyMeshData(LastMeshData);
 }
 
+bool UBlenderGeometryNodesComponent::RestoreLastMeshDataFromProceduralMesh()
+{
+	UProceduralMeshComponent* ProceduralMesh = GetProceduralMesh();
+	if (!ProceduralMesh)
+	{
+		return false;
+	}
+
+	FBlenderGNMeshData RestoredMeshData;
+	if (!BuildMeshDataFromProceduralMesh(ProceduralMesh, RestoredMeshData))
+	{
+		return false;
+	}
+
+	LastMeshData = RestoredMeshData;
+	LastVertexCount = LastMeshData.Vertices.Num();
+	LastTriangleCount = LastMeshData.GetTriangleCount();
+	LastMeshCenter = FVector::ZeroVector;
+	for (const FVector& Vertex : LastMeshData.Vertices)
+	{
+		LastMeshCenter += Vertex;
+	}
+	if (LastMeshData.Vertices.Num() > 0)
+	{
+		LastMeshCenter /= static_cast<float>(LastMeshData.Vertices.Num());
+	}
+
+	if (LastMeshData.Normals.Num() == LastMeshData.Vertices.Num())
+	{
+		PreviewStableNormals = LastMeshData.Normals;
+	}
+	CalculateTangentsAlignedWithNormals(LastMeshData, PreviewStableNormals, PreviewStableTangents);
+	BuildPreviewAnimationCache();
+	OnMeshUpdated.Broadcast(ProceduralMesh);
+	LastStatus = TEXT("Restored mesh cache from saved ProceduralMesh.");
+	return true;
+}
+
+void UBlenderGeometryNodesComponent::DisablePreviewAnimationMeshes()
+{
+	DestroyPreviewIslandMeshes();
+	if (FastDynamicMesh)
+	{
+		FastDynamicMesh->DestroyComponent();
+		FastDynamicMesh = nullptr;
+	}
+}
+
 void UBlenderGeometryNodesComponent::EnsureFastDynamicMesh()
 {
 	if (FastDynamicMesh && FastDynamicMesh->GetVertexCount() == LastMeshData.Vertices.Num())
@@ -1137,6 +1199,118 @@ void UBlenderGeometryNodesComponent::DestroyPreviewIslandMeshes()
 		}
 	}
 	PreviewIslandMeshes.Reset();
+}
+
+bool UBlenderGeometryNodesComponent::BuildMeshDataFromProceduralMesh(const UProceduralMeshComponent* ProceduralMesh, FBlenderGNMeshData& OutMeshData) const
+{
+	if (!ProceduralMesh)
+	{
+		return false;
+	}
+
+	OutMeshData.Reset();
+	OutMeshData.ObjectName = ObjectName;
+	OutMeshData.bImportedNormals = true;
+
+	auto CopySectionVertices = [&OutMeshData](const FProcMeshSection* Section)
+	{
+		OutMeshData.Vertices.Reset();
+		OutMeshData.Normals.Reset();
+		OutMeshData.UVs.Reset();
+		if (!Section)
+		{
+			return;
+		}
+
+		OutMeshData.Vertices.Reserve(Section->ProcVertexBuffer.Num());
+		OutMeshData.Normals.Reserve(Section->ProcVertexBuffer.Num());
+		OutMeshData.UVs.Reserve(Section->ProcVertexBuffer.Num());
+		for (const FProcMeshVertex& Vertex : Section->ProcVertexBuffer)
+		{
+			OutMeshData.Vertices.Add(Vertex.Position);
+			OutMeshData.Normals.Add(Vertex.Normal);
+			OutMeshData.UVs.Add(Vertex.UV0);
+		}
+	};
+
+	auto MatchesExistingVertices = [&OutMeshData](const FProcMeshSection* Section)
+	{
+		if (!Section || Section->ProcVertexBuffer.Num() != OutMeshData.Vertices.Num())
+		{
+			return false;
+		}
+
+		for (int32 Index = 0; Index < Section->ProcVertexBuffer.Num(); ++Index)
+		{
+			if (!Section->ProcVertexBuffer[Index].Position.Equals(OutMeshData.Vertices[Index], 0.01))
+			{
+				return false;
+			}
+		}
+		return true;
+	};
+
+	const int32 SectionCount = ProceduralMesh->GetNumSections();
+	for (int32 SectionIndex = 0; SectionIndex < SectionCount; ++SectionIndex)
+	{
+		const FProcMeshSection* Section = const_cast<UProceduralMeshComponent*>(ProceduralMesh)->GetProcMeshSection(SectionIndex);
+		if (!Section || Section->ProcVertexBuffer.Num() == 0 || Section->ProcIndexBuffer.Num() < 3)
+		{
+			continue;
+		}
+
+		FBlenderGNMeshSection& MeshSection = OutMeshData.Sections.AddDefaulted_GetRef();
+		if (OutMeshData.Vertices.Num() == 0)
+		{
+			CopySectionVertices(Section);
+			for (auto Index : Section->ProcIndexBuffer)
+			{
+				MeshSection.Triangles.Add(static_cast<int32>(Index));
+			}
+		}
+		else if (MatchesExistingVertices(Section))
+		{
+			for (auto Index : Section->ProcIndexBuffer)
+			{
+				MeshSection.Triangles.Add(static_cast<int32>(Index));
+			}
+		}
+		else
+		{
+			const int32 VertexOffset = OutMeshData.Vertices.Num();
+			OutMeshData.Vertices.Reserve(OutMeshData.Vertices.Num() + Section->ProcVertexBuffer.Num());
+			OutMeshData.Normals.Reserve(OutMeshData.Normals.Num() + Section->ProcVertexBuffer.Num());
+			OutMeshData.UVs.Reserve(OutMeshData.UVs.Num() + Section->ProcVertexBuffer.Num());
+			for (const FProcMeshVertex& Vertex : Section->ProcVertexBuffer)
+			{
+				OutMeshData.Vertices.Add(Vertex.Position);
+				OutMeshData.Normals.Add(Vertex.Normal);
+				OutMeshData.UVs.Add(Vertex.UV0);
+			}
+
+			MeshSection.Triangles.Reserve(Section->ProcIndexBuffer.Num());
+			for (auto Index : Section->ProcIndexBuffer)
+			{
+				MeshSection.Triangles.Add(VertexOffset + static_cast<int32>(Index));
+			}
+		}
+
+		OutMeshData.Triangles.Append(MeshSection.Triangles);
+		OutMeshData.MaterialIndices.Add(SectionIndex);
+
+		FBlenderGNMaterialInfo MaterialInfo;
+		if (UMaterialInterface* Material = ProceduralMesh->GetMaterial(SectionIndex))
+		{
+			MaterialInfo.Name = Material->GetName();
+		}
+		else
+		{
+			MaterialInfo.Name = FString::Printf(TEXT("Section_%d"), SectionIndex);
+		}
+		OutMeshData.Materials.Add(MaterialInfo);
+	}
+
+	return OutMeshData.Vertices.Num() > 0 && OutMeshData.Triangles.Num() >= 3 && OutMeshData.Sections.Num() > 0;
 }
 
 UProceduralMeshComponent* UBlenderGeometryNodesComponent::EnsureProceduralMesh()
@@ -1608,7 +1782,7 @@ void UBlenderGeometryNodesComponent::NormalizeTriangleWindingAndNormals(FBlender
 
 			const FVector FaceNormal = FVector::CrossProduct(MeshData.Vertices[B] - MeshData.Vertices[A], MeshData.Vertices[C] - MeshData.Vertices[A]).GetSafeNormal();
 			const FVector ImportedNormal = (MeshData.Normals[A] + MeshData.Normals[B] + MeshData.Normals[C]).GetSafeNormal();
-			if (!FaceNormal.IsNearlyZero() && !ImportedNormal.IsNearlyZero() && FVector::DotProduct(FaceNormal, ImportedNormal) > 0.0f)
+			if (!FaceNormal.IsNearlyZero() && !ImportedNormal.IsNearlyZero() && FVector::DotProduct(FaceNormal, ImportedNormal) < 0.0f)
 			{
 				FlipTriangleWinding(MeshData.Triangles, TriangleIndex);
 			}

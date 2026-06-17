@@ -26,6 +26,7 @@
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "EditorAssetLibrary.h"
+#include "IPythonScriptPlugin.h"
 
 FUnrealMCPEditorCommands::FUnrealMCPEditorCommands()
 {
@@ -99,6 +100,10 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleCommand(const FString& C
     else if (CommandType == TEXT("save_all"))
     {
         return HandleSaveAll(Params);
+    }
+    else if (CommandType == TEXT("execute_python_file"))
+    {
+        return HandleExecutePythonFile(Params);
     }
     else if (CommandType == TEXT("open_level"))
     {
@@ -732,8 +737,15 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSpawnBlueprintActor(cons
         return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Blueprint name is empty"));
     }
 
-    FString Root      = TEXT("/Game/Blueprints/");
-    FString AssetPath = Root + BlueprintName;
+    FString AssetPath = BlueprintName.StartsWith(TEXT("/Game/"))
+        ? BlueprintName
+        : TEXT("/Game/Blueprints/") + BlueprintName;
+
+    if (!FPackageName::IsValidLongPackageName(AssetPath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Invalid blueprint asset path: %s"), *AssetPath));
+    }
 
     // Try to load the blueprint directly (works even if not saved to disk yet)
     UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *AssetPath);
@@ -1333,6 +1345,33 @@ TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleSaveAll(const TSharedPtr
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetBoolField(TEXT("success"), bSuccess);
     ResultObj->SetBoolField(TEXT("needed_saving"), bNeededSaving);
+    return ResultObj;
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPEditorCommands::HandleExecutePythonFile(const TSharedPtr<FJsonObject>& Params)
+{
+    FString FilePath;
+    if (!Params->TryGetStringField(TEXT("path"), FilePath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Missing 'path' parameter"));
+    }
+
+    FilePath = FPaths::ConvertRelativePathToFull(FilePath);
+    if (!FPaths::FileExists(FilePath))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Python file not found: %s"), *FilePath));
+    }
+
+    IPythonScriptPlugin* PythonPlugin = IPythonScriptPlugin::Get();
+    if (!PythonPlugin || !PythonPlugin->IsPythonAvailable())
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("PythonScriptPlugin is not available"));
+    }
+
+    const bool bSuccess = PythonPlugin->ExecPythonCommand(*FilePath);
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetBoolField(TEXT("success"), bSuccess);
+    ResultObj->SetStringField(TEXT("path"), FilePath);
     return ResultObj;
 }
 

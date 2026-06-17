@@ -26,11 +26,11 @@ FString CleanGNLabel(const FString& Value)
 
 FString FBlenderGNInput::GetBestName() const
 {
-	if (!SocketName.IsEmpty())
+	if (!DisplayName.IsEmpty())
 	{
-		return SocketName;
+		return DisplayName;
 	}
-	return DisplayName.IsEmpty() ? FallbackIdentifier : DisplayName;
+	return SocketName.IsEmpty() ? FallbackIdentifier : SocketName;
 }
 
 bool FBlenderGNInput::MatchesName(const FString& Query) const

@@ -15,7 +15,7 @@ namespace
 			FMath::RoundToInt(Value.Z * SafeQuantization));
 	}
 
-	FIntVector QuantizeCell(const FVector& Value, float CellSize)
+	FIntVector QuantizeProceduralMeshCell(const FVector& Value, float CellSize)
 	{
 		const float SafeCellSize = FMath::Max(0.001f, CellSize);
 		return FIntVector(
@@ -163,7 +163,7 @@ namespace
 		for (int32 VertexIndex = 0; VertexIndex < Vertices.Num(); ++VertexIndex)
 		{
 			const FVector& Position = Vertices[VertexIndex];
-			const FIntVector Cell = QuantizeCell(Position, Tolerance);
+			const FIntVector Cell = QuantizeProceduralMeshCell(Position, Tolerance);
 			int32 Found = INDEX_NONE;
 			for (int32 X = -1; X <= 1 && Found == INDEX_NONE; ++X)
 			{

@@ -1,34 +1,58 @@
-{
-	"FileVersion": 3,
-	"EngineAssociation": "5.7",
-	"Category": "",
-	"Description": "",
-	"Modules": [
-		{
-			"Name": "MCPGameProject",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
-		}
-	],
-	"Plugins": [
-		{
-			"Name": "ModelingToolsEditorMode",
-			"Enabled": true,
-			"TargetAllowList": [
-				"Editor"
-			]
-		},
-		{
-			"Name": "UnrealMCP",
-			"Enabled": true
-		},
-		{
-			"Name": "OpenClawBlenderGeometryNodes",
-			"Enabled": true
-		},
-		{
-			"Name": "ProceduralMeshComponent",
-			"Enabled": true
-		}
-	]
+﻿{
+    "FileVersion":  3,
+    "EngineAssociation":  "5.7",
+    "Category":  "",
+    "Description":  "",
+    "Modules":  [
+                    {
+                        "Name":  "MCPGameProject",
+                        "Type":  "Runtime",
+                        "LoadingPhase":  "Default"
+                    }
+                ],
+    "Plugins":  [
+                    {
+                        "Name":  "ModelingToolsEditorMode",
+                        "Enabled":  true,
+                        "TargetAllowList":  [
+                                                "Editor"
+                                            ]
+                    },
+                    {
+                        "Name":  "UnrealMCP",
+                        "Enabled":  true
+                    },
+                    {
+                        "Name":  "PythonScriptPlugin",
+                        "Enabled":  true
+                    },
+                    {
+                        "Name":  "OpenClawBlenderGeometryNodes",
+                        "Enabled":  true
+                    },
+                    {
+                        "Name":  "ProceduralMeshComponent",
+                        "Enabled":  true
+                    },
+                    {
+                        "Name":  "TobiiEyeTracker5",
+                        "Enabled":  true
+                    },
+                    {
+                        "Name":  "Substance",
+                        "Enabled":  true
+                    },
+                    {
+                        "Name":  "USDImporter",
+                        "Enabled":  true
+                    },
+                    {
+                        "Name":  "UltraleapTracking",
+                        "Enabled":  true
+                    },
+                    {
+                        "Name":  "Niagara",
+                        "Enabled":  true
+                    }
+                ]
 }

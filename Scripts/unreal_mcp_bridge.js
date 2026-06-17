@@ -156,6 +156,19 @@ const TOOLS = [
     }
   },
   {
+    name: "reparent_blueprint_component",
+    description: "Reparent an existing Blueprint component under another component",
+    inputSchema: {
+      type: "object",
+      properties: {
+        blueprint_name: { type: "string" },
+        component_name: { type: "string" },
+        parent_component_name: { type: "string" }
+      },
+      required: ["blueprint_name", "component_name", "parent_component_name"]
+    }
+  },
+  {
     name: "set_static_mesh_properties",
     description: "设置蓝图中 StaticMeshComponent 的 Mesh / Material",
     inputSchema: {

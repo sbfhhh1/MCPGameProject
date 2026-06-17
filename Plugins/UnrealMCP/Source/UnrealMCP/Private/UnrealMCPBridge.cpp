@@ -239,6 +239,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("openclaw_gn_configure_refresh") ||
                      CommandType == TEXT("openclaw_gn_get_status") ||
                      CommandType == TEXT("openclaw_gn_dump_mesh_debug") ||
+                     CommandType == TEXT("execute_python_file") ||
                      CommandType == TEXT("save_all") ||
                      CommandType == TEXT("open_level"))
             {
@@ -247,6 +248,7 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
             // Blueprint Commands
             else if (CommandType == TEXT("create_blueprint") || 
                      CommandType == TEXT("add_component_to_blueprint") || 
+                     CommandType == TEXT("reparent_blueprint_component") ||
                      CommandType == TEXT("set_component_property") || 
                      CommandType == TEXT("set_physics_properties") || 
                      CommandType == TEXT("compile_blueprint") || 
@@ -280,7 +282,15 @@ FString UUnrealMCPBridge::ExecuteCommand(const FString& CommandType, const TShar
                      CommandType == TEXT("add_button_to_widget") ||
                      CommandType == TEXT("bind_widget_event") ||
                      CommandType == TEXT("set_text_block_binding") ||
-                     CommandType == TEXT("add_widget_to_viewport"))
+                     CommandType == TEXT("add_widget_to_viewport") ||
+                     CommandType == TEXT("add_slider_to_widget") ||
+                     CommandType == TEXT("add_checkbox_to_widget") ||
+                     CommandType == TEXT("add_vertical_box_to_widget") ||
+                     CommandType == TEXT("add_horizontal_box_to_widget") ||
+                     CommandType == TEXT("add_border_to_widget") ||
+                     CommandType == TEXT("add_size_box_to_widget") ||
+                     CommandType == TEXT("add_uniform_grid_panel_to_widget") ||
+                     CommandType == TEXT("set_widget_style"))
             {
                 ResultJson = UMGCommands->HandleCommand(CommandType, Params);
             }

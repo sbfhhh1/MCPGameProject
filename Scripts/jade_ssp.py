@@ -1,0 +1,13 @@
+import unreal
+prof=unreal.load_asset("/Game/TransformationVFX/SM2SM/jude/BurstJade/SSP_Jade")
+st=prof.get_editor_property("settings")
+st.set_editor_property("subsurface_color",unreal.LinearColor(0.30,0.50,0.20,1.0))
+st.set_editor_property("falloff_color",unreal.LinearColor(0.22,0.42,0.14,1.0))
+st.set_editor_property("scatter_radius",1.2)
+prof.set_editor_property("settings",st)
+unreal.EditorAssetLibrary.save_loaded_asset(prof)
+m=unreal.load_asset("/Game/TransformationVFX/SM2SM/jude/BurstJade/M_Burst_JadeDissolve")
+m.set_editor_property("subsurface_profile",prof)
+unreal.MaterialEditingLibrary.recompile_material(m)
+unreal.EditorAssetLibrary.save_loaded_asset(m)
+unreal.log("[JadeSSP] profile assigned green")

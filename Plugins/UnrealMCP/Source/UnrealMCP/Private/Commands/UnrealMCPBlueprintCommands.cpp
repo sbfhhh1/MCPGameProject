@@ -35,6 +35,10 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleCommand(const FString
     {
         return HandleAddComponentToBlueprint(Params);
     }
+    else if (CommandType == TEXT("reparent_blueprint_component"))
+    {
+        return HandleReparentBlueprintComponent(Params);
+    }
     else if (CommandType == TEXT("set_component_property"))
     {
         return HandleSetComponentProperty(Params);
@@ -241,6 +245,14 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleAddComponentToBluepri
             ComponentClass = FindObject<UClass>(nullptr, *ComponentTypeWithBoth);
         }
     }
+
+    if (!ComponentClass)
+    {
+        const FString ScriptClassPath = ComponentType.StartsWith(TEXT("/Script/"))
+            ? ComponentType
+            : FString::Printf(TEXT("/Script/MCPGameProject.%s"), *ComponentType);
+        ComponentClass = LoadClass<UActorComponent>(nullptr, *ScriptClassPath);
+    }
     
     // Verify that the class is a valid component type
     if (!ComponentClass || !ComponentClass->IsChildOf(UActorComponent::StaticClass()))
@@ -283,6 +295,113 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleAddComponentToBluepri
     }
 
     return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("Failed to add component to blueprint"));
+}
+
+TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleReparentBlueprintComponent(
+    const TSharedPtr<FJsonObject>& Params)
+{
+    FString BlueprintName;
+    FString ComponentName;
+    FString ParentComponentName;
+    if (!Params->TryGetStringField(TEXT("blueprint_name"), BlueprintName)
+        || !Params->TryGetStringField(TEXT("component_name"), ComponentName)
+        || !Params->TryGetStringField(TEXT("parent_component_name"), ParentComponentName))
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(
+            TEXT("Missing blueprint_name, component_name, or parent_component_name parameter"));
+    }
+
+    UBlueprint* Blueprint = FUnrealMCPCommonUtils::FindBlueprint(BlueprintName);
+    if (!Blueprint || !Blueprint->SimpleConstructionScript)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Blueprint not found: %s"), *BlueprintName));
+    }
+
+    USimpleConstructionScript* SCS = Blueprint->SimpleConstructionScript;
+    auto FindNodeByDisplayOrVariableName = [SCS](const FString& RequestedName) -> USCS_Node*
+    {
+        FString NormalizedRequestedName = RequestedName;
+        NormalizedRequestedName.ReplaceInline(TEXT(" "), TEXT(""));
+        NormalizedRequestedName.ReplaceInline(TEXT("_"), TEXT(""));
+
+        for (USCS_Node* Node : SCS->GetAllNodes())
+        {
+            if (!Node)
+            {
+                continue;
+            }
+            FString NormalizedVariableName = Node->GetVariableName().ToString();
+            NormalizedVariableName.ReplaceInline(TEXT(" "), TEXT(""));
+            NormalizedVariableName.ReplaceInline(TEXT("_"), TEXT(""));
+            if (NormalizedVariableName.Equals(NormalizedRequestedName, ESearchCase::IgnoreCase))
+            {
+                return Node;
+            }
+        }
+        return nullptr;
+    };
+
+    USCS_Node* ComponentNode = FindNodeByDisplayOrVariableName(ComponentName);
+    USCS_Node* ParentNode = FindNodeByDisplayOrVariableName(ParentComponentName);
+    if (!ParentNode && ParentComponentName.Equals(TEXT("DefaultSceneRoot"), ESearchCase::IgnoreCase))
+    {
+        ParentNode = SCS->GetDefaultSceneRootNode();
+    }
+    if (!ComponentNode || !ParentNode)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(
+            FString::Printf(TEXT("Component or parent not found: %s -> %s"), *ComponentName, *ParentComponentName));
+    }
+    if (ComponentNode == ParentNode)
+    {
+        return FUnrealMCPCommonUtils::CreateErrorResponse(TEXT("A component cannot be parented to itself"));
+    }
+
+    Blueprint->Modify();
+    SCS->Modify();
+    ComponentNode->Modify();
+    ParentNode->Modify();
+
+    USCS_Node* OldParent = SCS->FindParentNode(ComponentNode);
+    USCS_Node* ParentOldParent = SCS->FindParentNode(ParentNode);
+
+    // If the requested parent is currently below the component, first promote it
+    // to the component's former position to avoid creating a hierarchy cycle.
+    if (ParentNode->IsChildOf(ComponentNode))
+    {
+        if (ParentOldParent)
+        {
+            ParentOldParent->RemoveChildNode(ParentNode);
+        }
+        SCS->RemoveNode(ComponentNode, false);
+        if (OldParent)
+        {
+            OldParent->AddChildNode(ParentNode);
+        }
+        else
+        {
+            SCS->AddNode(ParentNode);
+        }
+    }
+    else if (OldParent)
+    {
+        OldParent->RemoveChildNode(ComponentNode);
+    }
+    else
+    {
+        SCS->RemoveNode(ComponentNode, false);
+    }
+
+    ParentNode->AddChildNode(ComponentNode);
+    SCS->ValidateSceneRootNodes();
+    FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+    FKismetEditorUtilities::CompileBlueprint(Blueprint);
+
+    TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+    ResultObj->SetStringField(TEXT("component_name"), ComponentName);
+    ResultObj->SetStringField(TEXT("parent_component_name"), ParentComponentName);
+    return ResultObj;
 }
 
 TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleSetComponentProperty(const TSharedPtr<FJsonObject>& Params)
@@ -868,10 +987,12 @@ TSharedPtr<FJsonObject> FUnrealMCPBlueprintCommands::HandleCompileBlueprint(cons
 
     // Compile the blueprint
     FKismetEditorUtilities::CompileBlueprint(Blueprint);
+    const bool bSaved = UEditorAssetLibrary::SaveLoadedAsset(Blueprint, false);
 
     TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
     ResultObj->SetStringField(TEXT("name"), BlueprintName);
     ResultObj->SetBoolField(TEXT("compiled"), true);
+    ResultObj->SetBoolField(TEXT("saved"), bSaved);
     return ResultObj;
 }
 

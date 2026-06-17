@@ -14,16 +14,32 @@ public class MCPGameProject : ModuleRules
 			"Engine", 
 			"InputCore", 
 			"EnhancedInput",
-			"UMG"  // Add UMG for Widget Blueprints
+			"UMG",  // Add UMG for Widget Blueprints
+			"OpenClawBlenderGeometryNodes",
+			"ProceduralMeshComponent",
+			"AIModule",
+			"NavigationSystem",
+			"Niagara",
+			"UDPWrapper"  // ESP32 WireEncoder UDP receiver
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] {
 			"Slate",
 			"SlateCore",  // Required for UMG
-			// Uncomment if you are using online features
-			// "OnlineSubsystem"
+			"Json",
+			"Sockets",
+			"Networking",
+			"TobiiEyeTracker5",
+			"UltraleapTracking"  // Leap Motion 手势：轮询掌心速度做左右挥手切模型
 		});
 
-		// To include OnlineSubsystemSteam, add it to the plugins section in your uproject file with the Enabled attribute set to true
+		// 编辑器构建：用 Niagara 编辑器 API 程序化给粒子系统加力模块（MorphVortexEditorLibrary）。
+		if (Target.bBuildEditor)
+		{
+			PrivateDependencyModuleNames.AddRange(new string[] {
+				"UnrealEd",
+				"NiagaraEditor"
+			});
+		}
 	}
 }

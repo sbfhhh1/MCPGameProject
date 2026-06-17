@@ -1,5 +1,6 @@
 #include "MetalSphereGrid.h"
 #include "UObject/ConstructorHelpers.h"
+#include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Engine/World.h"
 
@@ -19,10 +20,13 @@ AMetalSphereGrid::AMetalSphereGrid()
     }
 
     // 使用 DefaultLitMaterial 获得完整光照响应
-    static ConstructorHelpers::FObjectFinder<UMaterialInterface> MainMat(TEXT("/Engine/EngineMaterials/DefaultLitMaterial.DefaultLitMaterial"));
-    if (MainMat.Succeeded())
+    static ConstructorHelpers::FObjectFinder<UMaterialInterface> MainMat(TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+    UMaterialInterface* FallbackSurfaceMaterial = MainMat.Succeeded()
+        ? MainMat.Object
+        : UMaterial::GetDefaultMaterial(MD_Surface);
+    if (FallbackSurfaceMaterial)
     {
-        InstancedMesh->SetMaterial(0, MainMat.Object);
+        InstancedMesh->SetMaterial(0, FallbackSurfaceMaterial);
     }
 
     InstancedMesh->SetCollisionProfileName(TEXT("NoCollision"));
@@ -36,10 +40,9 @@ AMetalSphereGrid::AMetalSphereGrid()
         GlowMesh->SetStaticMesh(SphereMesh.Object);
     }
     // 光晕使用半透明材质
-    static ConstructorHelpers::FObjectFinder<UMaterialInterface> GlowMatRef(TEXT("/Engine/EngineMaterials/DefaultLitMaterial.DefaultLitMaterial"));
-    if (GlowMatRef.Succeeded())
+    if (FallbackSurfaceMaterial)
     {
-        GlowMesh->SetMaterial(0, GlowMatRef.Object);
+        GlowMesh->SetMaterial(0, FallbackSurfaceMaterial);
     }
     GlowMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     GlowMesh->SetCastShadow(false);
@@ -52,9 +55,9 @@ AMetalSphereGrid::AMetalSphereGrid()
     {
         PillarMesh->SetStaticMesh(CylinderMesh.Object);
     }
-    if (MainMat.Succeeded())
+    if (FallbackSurfaceMaterial)
     {
-        PillarMesh->SetMaterial(0, MainMat.Object);
+        PillarMesh->SetMaterial(0, FallbackSurfaceMaterial);
     }
     PillarMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
     PillarMesh->SetCastShadow(false);

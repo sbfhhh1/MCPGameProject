@@ -8,7 +8,7 @@ import bpy
 
 
 def log(message):
-    print("[UnityGN] " + message, flush=True)
+    print("[UnrealGN] " + message, flush=True)
 
 
 def load_request():

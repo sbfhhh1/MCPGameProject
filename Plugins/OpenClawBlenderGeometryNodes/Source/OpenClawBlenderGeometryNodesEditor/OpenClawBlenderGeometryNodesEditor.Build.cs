@@ -29,6 +29,7 @@ public class OpenClawBlenderGeometryNodesEditor : ModuleRules
 			"Projects",
 			"PropertyEditor",
 			"RawMesh",
+			"RenderCore",
 			"Slate",
 			"SlateCore",
 			"StaticMeshDescription",

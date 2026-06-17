@@ -15,7 +15,7 @@ namespace
 			FMath::RoundToInt(V.Z * Quantization));
 	}
 
-	void AddEdge(TArray<TArray<int32>>& Adjacency, int32 A, int32 B)
+	void AddSubmeshSmoothingEdge(TArray<TArray<int32>>& Adjacency, int32 A, int32 B)
 	{
 		if (Adjacency.IsValidIndex(A) && Adjacency.IsValidIndex(B))
 		{
@@ -158,9 +158,9 @@ void UBlenderGNSubmeshSmootherComponent::SmoothCurrentMesh()
 			continue;
 		}
 		Selected[A] = Selected[B] = Selected[C] = true;
-		AddEdge(Adjacency, A, B);
-		AddEdge(Adjacency, B, C);
-		AddEdge(Adjacency, C, A);
+		AddSubmeshSmoothingEdge(Adjacency, A, B);
+		AddSubmeshSmoothingEdge(Adjacency, B, C);
+		AddSubmeshSmoothingEdge(Adjacency, C, A);
 	}
 
 	TArray<FVector> Source = MeshData.Vertices;

@@ -175,8 +175,35 @@ UBlueprint* FUnrealMCPCommonUtils::FindBlueprint(const FString& BlueprintName)
 
 UBlueprint* FUnrealMCPCommonUtils::FindBlueprintByName(const FString& BlueprintName)
 {
-    FString AssetPath = TEXT("/Game/Blueprints/") + BlueprintName;
-    return LoadObject<UBlueprint>(nullptr, *AssetPath);
+    if (BlueprintName.StartsWith(TEXT("/Game/")))
+    {
+        return LoadObject<UBlueprint>(nullptr, *BlueprintName);
+    }
+
+    const FString DefaultAssetPath = TEXT("/Game/Blueprints/") + BlueprintName;
+    if (UBlueprint* Blueprint = LoadObject<UBlueprint>(nullptr, *DefaultAssetPath))
+    {
+        return Blueprint;
+    }
+
+    const FAssetRegistryModule& AssetRegistryModule =
+        FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    FARFilter Filter;
+    Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+    Filter.PackagePaths.Add(TEXT("/Game"));
+    Filter.bRecursivePaths = true;
+
+    TArray<FAssetData> Assets;
+    AssetRegistryModule.Get().GetAssets(Filter, Assets);
+    for (const FAssetData& Asset : Assets)
+    {
+        if (Asset.AssetName.ToString() == BlueprintName)
+        {
+            return Cast<UBlueprint>(Asset.GetAsset());
+        }
+    }
+
+    return nullptr;
 }
 
 UEdGraph* FUnrealMCPCommonUtils::FindOrCreateEventGraph(UBlueprint* Blueprint)

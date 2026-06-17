@@ -1,0 +1,16 @@
+import unreal
+
+
+INSTANCE_PATH = "/Game/TransformationVFX/SM2SM/jude/MI_YZL_AncientJade"
+
+instance = unreal.load_asset(INSTANCE_PATH)
+mel = unreal.MaterialEditingLibrary
+mel.set_material_instance_vector_parameter_value(
+    instance, "Jade Body Color", unreal.LinearColor(1.0, 0.0, 0.0, 1.0))
+mel.set_material_instance_vector_parameter_value(
+    instance, "Pale Vein Color", unreal.LinearColor(1.0, 0.0, 0.0, 1.0))
+mel.set_material_instance_vector_parameter_value(
+    instance, "SSS Scatter Color", unreal.LinearColor(1.0, 0.0, 0.0, 1.0))
+mel.set_material_instance_scalar_parameter_value(instance, "Cloudiness", 0.0)
+mel.update_material_instance(instance)
+unreal.log("[JadeTest] Applied extreme red instance parameters")

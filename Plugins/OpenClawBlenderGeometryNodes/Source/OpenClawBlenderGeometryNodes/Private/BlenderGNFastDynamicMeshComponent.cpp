@@ -221,6 +221,10 @@ public:
 			Element.MinVertexIndex = 0;
 			Element.MaxVertexIndex = NumVertices - 1;
 
+			FDynamicPrimitiveUniformBuffer& DynamicPrimitiveUniformBuffer = Collector.AllocateOneFrameResource<FDynamicPrimitiveUniformBuffer>();
+			DynamicPrimitiveUniformBuffer.Set(Collector.GetRHICommandList(), GetLocalToWorld(), GetLocalToWorld(), GetBounds(), GetLocalBounds(), true, false, AlwaysHasVelocity());
+			Element.PrimitiveUniformBufferResource = &DynamicPrimitiveUniformBuffer.UniformBuffer;
+
 			Collector.AddMesh(ViewIndex, Mesh);
 		}
 	}
@@ -234,6 +238,7 @@ public:
 		Result.bRenderInMainPass = ShouldRenderInMainPass();
 		Result.bUsesLightingChannels = GetLightingChannelMask() != GetDefaultLightingChannelMask();
 		MaterialRelevance.SetPrimitiveViewRelevance(Result);
+		Result.bVelocityRelevance = false;
 		return Result;
 	}
 
@@ -295,7 +300,7 @@ void UBlenderGNFastDynamicMeshComponent::InitMesh(
 		PositionBuffer[i] = FVector3f(Vertices[i]);
 		MeshBounds += Vertices[i];
 	}
-	const float BoundsPadding = FMath::Max(50.0f, MeshBounds.GetExtent().GetMax() * 0.1f);
+	const float BoundsPadding = FMath::Max(200.0f, MeshBounds.GetExtent().GetMax() * 1.0f);
 	LocalBounds = MeshBounds.ExpandBy(BoundsPadding);
 
 	// Build normals
