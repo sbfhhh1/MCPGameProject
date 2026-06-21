@@ -1,0 +1,82 @@
+{
+  "actors": [
+    {
+      "name": "StaticMeshActor_8",
+      "label": "frame",
+      "class": "StaticMeshActor",
+      "location": [
+        202.0,
+        0.0,
+        160.0
+      ],
+      "rotation": [
+        0.0,
+        90.00000000000003,
+        0.0
+      ],
+      "bounds_origin": [
+        127.16155815124509,
+        7.6293945028282906e-06,
+        160.0
+      ],
+      "bounds_extent": [
+        25.11623191833504,
+        177.69718170166018,
+        99.95465850830078
+      ],
+      "mesh": "/Game/TransformationVFX/SM2SM/Cube_001.Cube_001"
+    },
+    {
+      "name": "StaticMeshActor_9",
+      "label": "Cube_003",
+      "class": "StaticMeshActor",
+      "location": [
+        202.0,
+        0.0,
+        160.0
+      ],
+      "rotation": [
+        0.0,
+        90.00000000000003,
+        0.0
+      ],
+      "bounds_origin": [
+        351.0185890197754,
+        5.684341886080802e-14,
+        184.3952522277832
+      ],
+      "bounds_extent": [
+        200.5016136169436,
+        306.5928344726564,
+        118.26859664916992
+      ],
+      "mesh": "/Game/TransformationVFX/SM2SM/Cube_003.Cube_003"
+    },
+    {
+      "name": "StaticMeshActor_10",
+      "label": "Exhibition",
+      "class": "StaticMeshActor",
+      "location": [
+        202.0,
+        0.0,
+        160.0
+      ],
+      "rotation": [
+        0.0,
+        90.00000000000003,
+        0.0
+      ],
+      "bounds_origin": [
+        351.8989772796631,
+        -1.5258789005656581e-05,
+        33.68973159790039
+      ],
+      "bounds_extent": [
+        199.6212253570559,
+        306.59281921386736,
+        32.43692398071289
+      ],
+      "mesh": "/Game/TransformationVFX/SM2SM/Exhibition.Exhibition"
+    }
+  ]
+}

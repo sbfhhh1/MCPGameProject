@@ -1,4 +1,4 @@
-// Copyright 1998-2013 Epic Games, Inc. All Rights Reserved.
+﻿// Copyright 1998-2013 Epic Games, Inc. All Rights Reserved.
 using UnrealBuildTool;
 using System;
 using System.IO;
@@ -43,6 +43,9 @@ public class SubstanceCore : ModuleRules
 
 		//PCH file
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+
+	// Use prebuilt binaries - .lib files not available
+	bUsePrecompiled = true;
 		bEnforceIWYU = true;
 		PrivatePCHHeaderFile = "Private/SubstanceCorePrivatePCH.h";
 
@@ -101,3 +104,4 @@ public class SubstanceCore : ModuleRules
 	}
 }
 }
+

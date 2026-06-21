@@ -1,4 +1,4 @@
-using UnrealBuildTool;
+﻿using UnrealBuildTool;
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -53,6 +53,9 @@ public class SubstanceConnector : ModuleRules
 
         //PCH file
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+
+	// Use prebuilt binaries - .lib files not available
+	bUsePrecompiled = true;
         PrivatePCHHeaderFile = "Private/SubstanceConnectorPrivatePCH.h";
 
         List<string> StaticLibs = new List<string>();
@@ -124,3 +127,4 @@ public class SubstanceConnector : ModuleRules
         });
     }
 }
+

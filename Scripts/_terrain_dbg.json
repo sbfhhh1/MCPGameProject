@@ -1,0 +1,22 @@
+{
+  "found": true,
+  "components": [
+    "ProceduralMeshComponent",
+    "BlenderGeometryNodesComponent",
+    "BlenderGNWallNoiseMotionComponent"
+  ],
+  "pmc_visible": true,
+  "pmc_sections": 1,
+  "pmc_num_materials": 1,
+  "pmc_mat0": "M_TerraceTerrain",
+  "bounds_origin": [
+    -80.0,
+    0.0,
+    160.0
+  ],
+  "bounds_extent": [
+    11.250000000000014,
+    150.0,
+    75.00000000000003
+  ]
+}

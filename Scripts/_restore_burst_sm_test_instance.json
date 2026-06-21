@@ -1,0 +1,12 @@
+{
+  "found": true,
+  "actions": [
+    "reset actor transform",
+    "hide Static Mesh C",
+    "show Static Mesh A",
+    "hide Static Mesh B",
+    "stop and hide Niagara",
+    "hide widget"
+  ],
+  "saved_level": true
+}

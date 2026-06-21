@@ -40,7 +40,8 @@
                     },
                     {
                         "Name":  "Substance",
-                        "Enabled":  true
+                        "Enabled":  true,
+                        "MarketplaceURL":  "com.epicgames.launcher://ue/marketplace/content/2f6439c2f9584f49809d9b13b16c2ba4"
                     },
                     {
                         "Name":  "USDImporter",
@@ -48,7 +49,8 @@
                     },
                     {
                         "Name":  "UltraleapTracking",
-                        "Enabled":  true
+                        "Enabled":  true,
+                        "MarketplaceURL":  "com.epicgames.launcher://ue/marketplace/product/bee1e122fcae438abb50441ee6286d92"
                     },
                     {
                         "Name":  "Niagara",

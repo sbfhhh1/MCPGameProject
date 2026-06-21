@@ -1,4 +1,4 @@
-// Copyright 2017 Allegorithmic, Inc. All Rights Reserved.
+﻿// Copyright 2017 Allegorithmic, Inc. All Rights Reserved.
 using UnrealBuildTool;
 using System;
 using System.IO;
@@ -16,6 +16,9 @@ public class SubstanceEditor : ModuleRules
 	{
 		//PCH file
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+
+	// Use prebuilt binaries - .lib files not available
+	bUsePrecompiled = true;
 		bEnforceIWYU = true;
 		PrivatePCHHeaderFile = "Private/SubstanceEditorPrivatePCH.h";
 
@@ -58,3 +61,4 @@ public class SubstanceEditor : ModuleRules
 
 	}
 }
+

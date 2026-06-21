@@ -1,0 +1,192 @@
+{
+  "total": 13,
+  "actors": [
+    {
+      "label": "SkyAtmosphere",
+      "class": "SkyAtmosphere",
+      "loc": [
+        0.0,
+        0.0,
+        -6000.0
+      ],
+      "mesh_components": {},
+      "static_meshes": []
+    },
+    {
+      "label": "VolumetricCloud",
+      "class": "VolumetricCloud",
+      "loc": [
+        0.0,
+        0.0,
+        700.0
+      ],
+      "mesh_components": {},
+      "static_meshes": []
+    },
+    {
+      "label": "SM_SkySphere",
+      "class": "StaticMeshActor",
+      "loc": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "mesh_components": {
+        "StaticMeshComponent": 1
+      },
+      "static_meshes": [
+        "SM_SkySphere"
+      ]
+    },
+    {
+      "label": "Floor",
+      "class": "StaticMeshActor",
+      "loc": [
+        0.0,
+        0.0,
+        -0.5
+      ],
+      "mesh_components": {
+        "StaticMeshComponent": 1
+      },
+      "static_meshes": [
+        "SM_Template_Map_Floor"
+      ]
+    },
+    {
+      "label": "PlayerStart",
+      "class": "PlayerStart",
+      "loc": [
+        -420.0,
+        0.0,
+        160.0
+      ],
+      "mesh_components": {},
+      "static_meshes": []
+    },
+    {
+      "label": "BG",
+      "class": "StaticMeshActor",
+      "loc": [
+        430.0,
+        0.0,
+        160.0
+      ],
+      "mesh_components": {
+        "StaticMeshComponent": 1
+      },
+      "static_meshes": [
+        "Plane"
+      ]
+    },
+    {
+      "label": "ExhibitionLightingRig_Professional",
+      "class": "BP_ExhibitionLightingRig_Professional_C",
+      "loc": [
+        240.0,
+        0.0,
+        0.0
+      ],
+      "mesh_components": {
+        "StaticMeshComponent": 4
+      },
+      "static_meshes": [
+        "Cube",
+        "Cube",
+        "Cube",
+        "Cube"
+      ]
+    },
+    {
+      "label": "frame",
+      "class": "StaticMeshActor",
+      "loc": [
+        202.0,
+        0.0,
+        160.0
+      ],
+      "mesh_components": {
+        "StaticMeshComponent": 1
+      },
+      "static_meshes": [
+        "Cube_001"
+      ]
+    },
+    {
+      "label": "Cube_003",
+      "class": "StaticMeshActor",
+      "loc": [
+        202.0,
+        0.0,
+        160.0
+      ],
+      "mesh_components": {
+        "StaticMeshComponent": 1
+      },
+      "static_meshes": [
+        "Cube_003"
+      ]
+    },
+    {
+      "label": "Exhibition",
+      "class": "StaticMeshActor",
+      "loc": [
+        202.0,
+        0.0,
+        160.0
+      ],
+      "mesh_components": {
+        "StaticMeshComponent": 1
+      },
+      "static_meshes": [
+        "Exhibition"
+      ]
+    },
+    {
+      "label": "BP_Burst_SM_Test",
+      "class": "BP_Burst_SM_C",
+      "loc": [
+        250.0,
+        0.0,
+        170.0
+      ],
+      "mesh_components": {
+        "StaticMeshComponent": 3,
+        "WidgetComponent": 1
+      },
+      "static_meshes": [
+        "20260613130638_a1276204",
+        "20260613133607_ec021d65",
+        "20260613123723_f8ed59ab"
+      ]
+    },
+    {
+      "label": "water",
+      "class": "StaticMeshActor",
+      "loc": [
+        350.0,
+        0.0,
+        60.0
+      ],
+      "mesh_components": {
+        "StaticMeshComponent": 1
+      },
+      "static_meshes": [
+        "Plane"
+      ]
+    },
+    {
+      "label": "Chinese_Seal_Pool_Animator",
+      "class": "ChineseSealPoolAnimator",
+      "loc": [
+        350.0,
+        0.0,
+        60.0
+      ],
+      "mesh_components": {
+        "ProceduralMeshComponent": 128
+      },
+      "static_meshes": []
+    }
+  ]
+}

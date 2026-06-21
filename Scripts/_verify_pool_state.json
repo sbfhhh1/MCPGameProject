@@ -1,0 +1,9 @@
+{
+  "pool_label": "Chinese_Seal_Pool_Animator",
+  "static_components": 72,
+  "procedural_components": 0,
+  "first_comp_mesh": "SM_Seal_Feng",
+  "first_comp_tris": 10670,
+  "asset_SM_Seal_Shui_tris": 11866,
+  "asset_SM_Seal_Shui_verts": 23789
+}

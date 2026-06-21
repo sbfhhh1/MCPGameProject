@@ -1,0 +1,298 @@
+[
+  {
+    "label": "SM_SkySphere",
+    "name": "StaticMeshActor_0",
+    "class": "StaticMeshActor",
+    "location": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "bounds_origin": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "bounds_extent": [
+      1638400.0,
+      1638400.0,
+      1638400.0
+    ],
+    "meshes": [
+      {
+        "component": "StaticMeshComponent0",
+        "mesh": "/Engine/EngineSky/SM_SkySphere.SM_SkySphere",
+        "materials": [
+          "/Engine/EngineSky/M_SimpleSkyDome.M_SimpleSkyDome"
+        ]
+      }
+    ]
+  },
+  {
+    "label": "Floor",
+    "name": "Floor_0",
+    "class": "StaticMeshActor",
+    "location": [
+      0.0,
+      0.0,
+      -0.5
+    ],
+    "bounds_origin": [
+      -0.0009765625,
+      0.00048828125,
+      -200.5001220703125
+    ],
+    "bounds_extent": [
+      4000.00146484375,
+      4000.0,
+      200.0001220703125
+    ],
+    "meshes": [
+      {
+        "component": "StaticMeshComponent0",
+        "mesh": "/Engine/MapTemplates/SM_Template_Map_Floor.SM_Template_Map_Floor",
+        "materials": [
+          "/Engine/OpenWorldTemplate/LandscapeMaterial/MI_ProcGrid.MI_ProcGrid"
+        ]
+      }
+    ]
+  },
+  {
+    "label": "BG",
+    "name": "StaticMeshActor_1",
+    "class": "StaticMeshActor",
+    "location": [
+      430.0,
+      0.0,
+      160.0
+    ],
+    "bounds_origin": [
+      430.0,
+      0.0,
+      160.0
+    ],
+    "bounds_extent": [
+      5.684341886080802e-14,
+      125.0,
+      125.00000000000001
+    ],
+    "meshes": [
+      {
+        "component": "StaticMeshComponent0",
+        "mesh": "/Engine/BasicShapes/Plane.Plane",
+        "materials": [
+          "/Game/TransformationVFX/SM2SM/MI_BG_Network.MI_BG_Network"
+        ]
+      }
+    ]
+  },
+  {
+    "label": "ExhibitionLightingRig_Professional",
+    "name": "BP_ExhibitionLightingRig_Professional_C_0",
+    "class": "BP_ExhibitionLightingRig_Professional_C",
+    "location": [
+      240.0,
+      0.0,
+      0.0
+    ],
+    "bounds_origin": [
+      134.0,
+      0.0,
+      158.5
+    ],
+    "bounds_extent": [
+      584.0,
+      707.5000002980232,
+      414.5
+    ],
+    "meshes": [
+      {
+        "component": "BackWall",
+        "mesh": "/Engine/BasicShapes/Cube.Cube",
+        "materials": [
+          "/Game/Sbsar/Plaster_Black_MAT1.Plaster_Black_MAT1"
+        ]
+      },
+      {
+        "component": "LeftWall",
+        "mesh": "/Engine/BasicShapes/Cube.Cube",
+        "materials": [
+          "/Game/Sbsar/Plaster_MAT.Plaster_MAT"
+        ]
+      },
+      {
+        "component": "RightWall",
+        "mesh": "/Engine/BasicShapes/Cube.Cube",
+        "materials": [
+          "/Game/Sbsar/Plaster_MAT.Plaster_MAT"
+        ]
+      },
+      {
+        "component": "Ceiling",
+        "mesh": "/Engine/BasicShapes/Cube.Cube",
+        "materials": [
+          "/Game/Sbsar/Plaster_MAT.Plaster_MAT"
+        ]
+      }
+    ]
+  },
+  {
+    "label": "frame",
+    "name": "StaticMeshActor_8",
+    "class": "StaticMeshActor",
+    "location": [
+      202.0,
+      0.0,
+      160.0
+    ],
+    "bounds_origin": [
+      127.16155815124509,
+      7.6293945028282906e-06,
+      160.0
+    ],
+    "bounds_extent": [
+      25.11623191833504,
+      177.69718170166018,
+      99.95465850830078
+    ],
+    "meshes": [
+      {
+        "component": "StaticMeshComponent0",
+        "mesh": "/Game/TransformationVFX/SM2SM/Cube_001.Cube_001",
+        "materials": [
+          "/Game/Sbsar/Wood_MAT.Wood_MAT"
+        ]
+      }
+    ]
+  },
+  {
+    "label": "Cube_003",
+    "name": "StaticMeshActor_9",
+    "class": "StaticMeshActor",
+    "location": [
+      202.0,
+      0.0,
+      160.0
+    ],
+    "bounds_origin": [
+      351.0185890197754,
+      5.684341886080802e-14,
+      184.3952522277832
+    ],
+    "bounds_extent": [
+      200.5016136169436,
+      306.5928344726564,
+      118.26859664916992
+    ],
+    "meshes": [
+      {
+        "component": "StaticMeshComponent0",
+        "mesh": "/Game/TransformationVFX/SM2SM/Cube_003.Cube_003",
+        "materials": [
+          "/Game/Sbsar/Concrete_Smooth_MAT.Concrete_Smooth_MAT"
+        ]
+      }
+    ]
+  },
+  {
+    "label": "Exhibition",
+    "name": "StaticMeshActor_10",
+    "class": "StaticMeshActor",
+    "location": [
+      202.0,
+      0.0,
+      160.0
+    ],
+    "bounds_origin": [
+      351.8989772796631,
+      -1.5258789005656581e-05,
+      33.68973159790039
+    ],
+    "bounds_extent": [
+      199.6212253570559,
+      306.59281921386736,
+      32.43692398071289
+    ],
+    "meshes": [
+      {
+        "component": "StaticMeshComponent0",
+        "mesh": "/Game/TransformationVFX/SM2SM/Exhibition.Exhibition",
+        "materials": [
+          "/Game/Sbsar/Concrete_Simple_MAT.Concrete_Simple_MAT"
+        ]
+      }
+    ]
+  },
+  {
+    "label": "BP_Burst_SM_Test",
+    "name": "BP_Burst_SM_C_0",
+    "class": "BP_Burst_SM_C",
+    "location": [
+      250.0,
+      0.0,
+      170.0
+    ],
+    "bounds_origin": [
+      250.0,
+      24000.0,
+      29170.0
+    ],
+    "bounds_extent": [
+      64000.0,
+      45500.0,
+      49000.0
+    ],
+    "meshes": [
+      {
+        "component": "Static Mesh C",
+        "mesh": "/Game/TransformationVFX/SM2SM/jude/20260613130638_a1276204.20260613130638_a1276204",
+        "materials": [
+          "/Game/TransformationVFX/SM2SM/jude/BurstJade/MI_Burst_Jade_YZL.MI_Burst_Jade_YZL"
+        ]
+      },
+      {
+        "component": "Static Mesh A",
+        "mesh": "/Game/TransformationVFX/SM2SM/jude/20260613133607_ec021d65.20260613133607_ec021d65",
+        "materials": [
+          "/Game/TransformationVFX/SM2SM/jude/BurstJade/MI_Burst_Jade_YF.MI_Burst_Jade_YF"
+        ]
+      },
+      {
+        "component": "Static Mesh B",
+        "mesh": "/Game/TransformationVFX/SM2SM/jude/20260613123723_f8ed59ab.20260613123723_f8ed59ab",
+        "materials": [
+          "/Game/TransformationVFX/SM2SM/jude/BurstJade/MI_Burst_Jade_TYS.MI_Burst_Jade_TYS"
+        ]
+      }
+    ]
+  },
+  {
+    "label": "Plane",
+    "name": "StaticMeshActor_2",
+    "class": "StaticMeshActor",
+    "location": [
+      350.0,
+      0.0,
+      60.0
+    ],
+    "bounds_origin": [
+      350.0,
+      0.0,
+      60.0
+    ],
+    "bounds_extent": [
+      200.0,
+      200.0,
+      3.552713678800501e-14
+    ],
+    "meshes": [
+      {
+        "component": "StaticMeshComponent0",
+        "mesh": "/Engine/BasicShapes/Plane.Plane",
+        "materials": [
+          "/DatasmithContent/Materials/Water/MI_Pool_01.MI_Pool_01"
+        ]
+      }
+    ]
+  }
+]

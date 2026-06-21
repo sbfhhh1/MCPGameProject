@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
@@ -23,12 +23,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Particles|Materials")
 	TArray<TObjectPtr<UMaterialInterface>> StateParticleMaterials;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Models")
-	TArray<TObjectPtr<UMaterialInterface>> StateFadeMaterials;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Models")
-	TObjectPtr<UMaterialInterface> FallbackModelFadeMaterial;
-
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Timing", meta=(ClampMin="0.1"))
 	float FrontHalfDuration = 2.5f;
 
@@ -38,12 +32,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Timing", meta=(ClampMin="0.0"))
 	float SourceHideDelay = 0.08f;
 
-	// 粒子消散与模型淡入的重叠时长：模型淡入会比粒子完全消散提前这么多秒启动，
-	// 让粒子淡出尾段与模型淡入重叠，过渡更连贯。设 0 则维持“粒子完全结束后再淡入”。
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Timing", meta=(ClampMin="0.0"))
 	float ParticleModelOverlapDuration = 0.8f;
 
-	// 旧模型溶解淡出的时长：切换时旧模型用 Dissolve 1->0 渐变消散，而不是瞬间隐藏。
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Timing", meta=(ClampMin="0.0"))
 	float SourceFadeOutDuration = 1.0f;
 
@@ -74,12 +65,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Particles|System")
 	TObjectPtr<UNiagaraSystem> ParticleSystem;
 
-	// 网格→网格粒子变形系统（P_Morph_5_SM 风格）：粒子从源网格表面采样、流动重组成目标网格形状。
-	// 这是新属性，BP 实例不会覆盖它，因此这里的默认值始终生效，避免旧的 ParticleSystem 覆盖值（NS_Return_SM）干扰。
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Particles|System")
 	TObjectPtr<UNiagaraSystem> MorphParticleSystem;
 
-	// 是否用下面的值覆盖 P_Morph_5_SM 的内置参数。关闭时完全沿用系统默认外观，最贴近 BP_Morph_SM_5。
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Morph")
 	bool bOverrideMorphParameters = false;
 
@@ -119,53 +107,45 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Particles|Fade")
 	FName ParticleFadeOpacityParameter = TEXT("Fade Opacity");
 
-	// 玉石溶解材质（移植自 M_Chair_Dissolve）语义：Dissolve Amount 1.0=完全显示，0.0=完全溶解消失。
-	// 因此模型淡入出现需要从 0.0（不可见）渐变到 1.0（完全显示）。
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Model Fade", meta=(ClampMin="0.0", ClampMax="1.0"))
-	float ModelFadeStartDissolve = 0.0f;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Model Fade", meta=(ClampMin="0.0", ClampMax="1.0"))
-	float ModelFadeEndDissolve = 1.0f;
-
-	// ---------------- Leap Motion 挥手手势 ----------------
-	// 右手向左摆动 → 模型 ID 反向更新；左手向右挥动 → 模型 ID 正向更新。
-	// 通过速度阈值 + 水平分量主导 + 每手冷却 + 过渡期屏蔽四重防抖，避免数据抖动导致模型闪烁切换。
+	// ---------------- Leap Motion 鎸ユ墜鎵嬪娍 ----------------
+	// 鍙虫墜鍚戝乏鎽嗗姩 鈫?妯″瀷 ID 鍙嶅悜鏇存柊锛涘乏鎵嬪悜鍙虫尌鍔?鈫?妯″瀷 ID 姝ｅ悜鏇存柊銆?
+	// 閫氳繃閫熷害闃堝€?+ 姘村钩鍒嗛噺涓诲 + 姣忔墜鍐峰嵈 + 杩囨浮鏈熷睆钄藉洓閲嶉槻鎶栵紝閬垮厤鏁版嵁鎶栧姩瀵艰嚧妯″瀷闂儊鍒囨崲銆?
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Leap Gesture")
 	bool bEnableLeapSwipe = true;
 
-	// 触发挥手所需的最小掌心水平速度（UE 空间 cm/s）。低于此值的微小移动视为抖动并忽略。
+	// 瑙﹀彂鎸ユ墜鎵€闇€鐨勬渶灏忔帉蹇冩按骞抽€熷害锛圲E 绌洪棿 cm/s锛夈€備綆浜庢鍊肩殑寰皬绉诲姩瑙嗕负鎶栧姩骞跺拷鐣ャ€?
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Leap Gesture", meta=(ClampMin="1.0"))
 	float SwipeVelocityThreshold = 80.0f;
 
-	// 一次挥手触发后，该手的冷却时间（秒）。防止单次挥动在多帧内重复触发，是防闪烁的关键。
+	// 涓€娆℃尌鎵嬭Е鍙戝悗锛岃鎵嬬殑鍐峰嵈鏃堕棿锛堢锛夈€傞槻姝㈠崟娆℃尌鍔ㄥ湪澶氬抚鍐呴噸澶嶈Е鍙戯紝鏄槻闂儊鐨勫叧閿€?
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Leap Gesture", meta=(ClampMin="0.0"))
 	float SwipeCooldownSeconds = 0.8f;
 
-	// 手部跟踪置信度低于此值时忽略，避免跟踪不稳定时误触发。
+	// 鎵嬮儴璺熻釜缃俊搴︿綆浜庢鍊兼椂蹇界暐锛岄伩鍏嶈窡韪笉绋冲畾鏃惰瑙﹀彂銆?
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Leap Gesture", meta=(ClampMin="0.0", ClampMax="1.0"))
 	float MinHandConfidence = 0.2f;
 
-	// 若设备安装朝向导致左右方向（Y 轴）相反，勾选此项翻转判定方向。
+	// 鑻ヨ澶囧畨瑁呮湞鍚戝鑷村乏鍙虫柟鍚戯紙Y 杞达級鐩稿弽锛屽嬀閫夋椤圭炕杞垽瀹氭柟鍚戙€?
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Leap Gesture")
 	bool bInvertSwipeAxis = false;
 
-	// 默认在切换过渡进行中忽略新的挥手，确保模型完整成形后再响应下一次，进一步防闪烁。
+	// 榛樿鍦ㄥ垏鎹㈣繃娓¤繘琛屼腑蹇界暐鏂扮殑鎸ユ墜锛岀‘淇濇ā鍨嬪畬鏁存垚褰㈠悗鍐嶅搷搴斾笅涓€娆★紝杩涗竴姝ラ槻闂儊銆?
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Leap Gesture")
 	bool bAllowSwipeDuringTransition = false;
 
-	// ---------------- 模型自转 ----------------
-	// 模型完整显示时绕竖直轴（世界 Z 轴）从当前角度缓慢自转；隐藏或切换过渡中不转。
+	// ---------------- 妯″瀷鑷浆 ----------------
+	// 妯″瀷瀹屾暣鏄剧ず鏃剁粫绔栫洿杞达紙涓栫晫 Z 杞达級浠庡綋鍓嶈搴︾紦鎱㈣嚜杞紱闅愯棌鎴栧垏鎹㈣繃娓′腑涓嶈浆銆?
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Rotation")
 	bool bEnableModelRotation = true;
 
-	// 自转速度（度/秒）。正值逆时针、负值顺时针；0 等同关闭。
+	// 鑷浆閫熷害锛堝害/绉掞級銆傛鍊奸€嗘椂閽堛€佽礋鍊奸『鏃堕拡锛? 绛夊悓鍏抽棴銆?
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Rotation")
 	float RotationSpeedDegreesPerSecond = 30.0f;
 
 	UFUNCTION(BlueprintCallable, Category="Burst Switcher|Models")
 	void SwitchToState(int32 StateIndex);
 
-	// 按方向循环切换模型（+1 正向 / -1 反向），带环绕。
+	// 鎸夋柟鍚戝惊鐜垏鎹㈡ā鍨嬶紙+1 姝ｅ悜 / -1 鍙嶅悜锛夛紝甯︾幆缁曘€?
 	UFUNCTION(BlueprintCallable, Category="Burst Switcher|Models")
 	void CycleModel(int32 Direction);
 
@@ -178,6 +158,9 @@ protected:
 private:
 	void CacheOwnerComponents();
 	void ApplyInitialStateMaterials();
+	void CaptureInitialStateMaterials();
+	void RestoreStateInitialMaterials(int32 StateIndex);
+	UMaterialInterface* GetStateInitialMaterial(int32 StateIndex, int32 MaterialIndex = 0) const;
 	void DisableLegacyTriggerAndUI();
 	void SetRuntimeStateVisibility(int32 VisibleStateIndex);
 	void ApplyParticleSettings();
@@ -198,9 +181,9 @@ private:
 	void PollLeapSwipeGestures(float DeltaTime);
 	void UpdateModelRotation(float DeltaTime);
 	bool IsTransitionInProgress() const;
-	// 判定掌心速度是否构成一次有效的水平挥手（阈值 + 水平分量主导）。
+	// 鍒ゅ畾鎺屽績閫熷害鏄惁鏋勬垚涓€娆℃湁鏁堢殑姘村钩鎸ユ墜锛堥槇鍊?+ 姘村钩鍒嗛噺涓诲锛夈€?
 	bool IsLateralSwipe(const FVector& Velocity) const;
-	// Leap 帧回调（游戏线程）：仅缓存左右手掌心速度/置信度，实际判定放在 Tick 中按 DeltaTime 走冷却。
+	// Leap 甯у洖璋冿紙娓告垙绾跨▼锛夛細浠呯紦瀛樺乏鍙虫墜鎺屽績閫熷害/缃俊搴︼紝瀹為檯鍒ゅ畾鏀惧湪 Tick 涓寜 DeltaTime 璧板喎鍗淬€?
 	void OnLeapTrackingData(const FLeapFrameData& Frame);
 
 	UPROPERTY(Transient)
@@ -227,6 +210,15 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> ActiveParticleMaterial;
 
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInterface>> InitialStateMaterials;
+
+	UPROPERTY(Transient)
+	TArray<int32> InitialStateMaterialOffsets;
+
+	UPROPERTY(Transient)
+	TArray<int32> InitialStateMaterialCounts;
+
 	FVector NiagaraBaseLocation = FVector::ZeroVector;
 	FVector NiagaraBaseScale = FVector::OneVector;
 	FRotator NiagaraBaseRotation = FRotator::ZeroRotator;
@@ -247,11 +239,11 @@ private:
 	FTimerHandle BeginRevealTimer;
 	FTimerHandle ParticleFadeOutTimer;
 
-	// 每手挥手冷却剩余时间（秒），左右手独立计时。
+	// 姣忔墜鎸ユ墜鍐峰嵈鍓╀綑鏃堕棿锛堢锛夛紝宸﹀彸鎵嬬嫭绔嬭鏃躲€?
 	float LeftHandSwipeCooldown = 0.0f;
 	float RightHandSwipeCooldown = 0.0f;
 
-	// Leap 帧回调缓存的最新手部数据（游戏线程写入，Tick 读取）。
+	// Leap 甯у洖璋冪紦瀛樼殑鏈€鏂版墜閮ㄦ暟鎹紙娓告垙绾跨▼鍐欏叆锛孴ick 璇诲彇锛夈€?
 	FVector LeftPalmVelocity = FVector::ZeroVector;
 	FVector RightPalmVelocity = FVector::ZeroVector;
 	float LeftHandConfidence = 0.0f;

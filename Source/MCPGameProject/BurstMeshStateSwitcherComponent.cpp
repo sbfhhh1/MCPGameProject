@@ -1,8 +1,9 @@
-#include "BurstMeshStateSwitcherComponent.h"
+﻿#include "BurstMeshStateSwitcherComponent.h"
 
 #include "Components/BoxComponent.h"
 #include "Components/InputComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
 #include "Components/WidgetComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -18,6 +19,71 @@
 #include "LeapSubsystem.h"
 #include "UltraleapTrackingData.h"
 
+namespace
+{
+bool IsInitialDisplayMaterialUsable(UMaterialInterface* Material)
+{
+	if (!Material || Material->IsA<UMaterialInstanceDynamic>())
+	{
+		return false;
+	}
+
+	return true;
+}
+
+UMaterialInterface* LoadFallbackInitialDisplayMaterial(int32 StateIndex)
+{
+	const TCHAR* MaterialPaths[] = {
+		TEXT("/Game/TransformationVFX/SM2SM/jude/BurstJade/MI_TYS_Jade_SSS.MI_TYS_Jade_SSS"),
+		TEXT("/Game/TransformationVFX/SM2SM/jude/BurstJade/MI_YF_Jade_SSS.MI_YF_Jade_SSS"),
+		TEXT("/Game/TransformationVFX/SM2SM/jude/BurstJade/MI_YZL_Jade_SSS.MI_YZL_Jade_SSS")
+	};
+
+	if (StateIndex < 0 || StateIndex >= UE_ARRAY_COUNT(MaterialPaths))
+	{
+		return nullptr;
+	}
+
+	return LoadObject<UMaterialInterface>(nullptr, MaterialPaths[StateIndex]);
+}
+
+UMaterialInterface* ResolveInitialDisplayMaterial(
+	UStaticMeshComponent* MeshComponent, int32 MaterialIndex, int32 StateIndex)
+{
+	if (!MeshComponent)
+	{
+		return LoadFallbackInitialDisplayMaterial(StateIndex);
+	}
+
+	if (const UStaticMeshComponent* TemplateComponent =
+		Cast<UStaticMeshComponent>(MeshComponent->GetArchetype()))
+	{
+		if (UMaterialInterface* TemplateMaterial = TemplateComponent->GetMaterial(MaterialIndex);
+			IsInitialDisplayMaterialUsable(TemplateMaterial))
+		{
+			return TemplateMaterial;
+		}
+	}
+
+	if (const UStaticMesh* StaticMesh = MeshComponent->GetStaticMesh())
+	{
+		if (UMaterialInterface* MeshMaterial = StaticMesh->GetMaterial(MaterialIndex);
+			IsInitialDisplayMaterialUsable(MeshMaterial))
+		{
+			return MeshMaterial;
+		}
+	}
+
+	if (UMaterialInterface* CurrentMaterial = MeshComponent->GetMaterial(MaterialIndex);
+		IsInitialDisplayMaterialUsable(CurrentMaterial))
+	{
+		return CurrentMaterial;
+	}
+
+	return LoadFallbackInitialDisplayMaterial(StateIndex);
+}
+} // namespace
+
 UBurstMeshStateSwitcherComponent::UBurstMeshStateSwitcherComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
@@ -28,23 +94,16 @@ UBurstMeshStateSwitcherComponent::UBurstMeshStateSwitcherComponent()
 		TEXT("/Game/NiagaraMorphEffect/Niagara/P_Morph_5_SM.P_Morph_5_SM"));
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> InhalationParticleMaterial(
 		TEXT("/Game/TransformationVFX/Material/CharactorMaterial/MI_Manny_Particle.MI_Manny_Particle"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> ChairFadeMaterial(
-		TEXT("/Game/TransformationVFX/Material/ObjectMaterial/MI_Chair_UniversalDissolve.MI_Chair_UniversalDissolve"));
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> TableFadeMaterial(
-		TEXT("/Game/TransformationVFX/Material/ObjectMaterial/MI_TableRound_UniversalDissolve.MI_TableRound_UniversalDissolve"));
 
 	StateParticleMaterials = {
 		InhalationParticleMaterial.Object,
 		InhalationParticleMaterial.Object,
 		InhalationParticleMaterial.Object
 	};
-	StateFadeMaterials = {ChairFadeMaterial.Object, TableFadeMaterial.Object, nullptr};
-	FallbackModelFadeMaterial = LoadObject<UMaterialInterface>(
-		nullptr, TEXT("/Game/TransformationVFX/SM2SM/M_Generic_ModelFade.M_Generic_ModelFade"));
 	ParticleMaterial = InhalationParticleMaterial.Object;
 	ParticleSystem = InhalationSystem.Object;
-	// 网格→网格粒子变形系统（P_Morph_5_SM）。涡流由编辑器工具往该系统加 VortexForce 模块实现，
-	// 去掉 spring 用 User.Spring Force=0（见 ApplyMorphParameters）。新属性 BP 不覆盖。
+	// 缃戞牸鈫掔綉鏍肩矑瀛愬彉褰㈢郴缁燂紙P_Morph_5_SM锛夈€傛丁娴佺敱缂栬緫鍣ㄥ伐鍏峰線璇ョ郴缁熷姞 VortexForce 妯″潡瀹炵幇锛?
+	// 鍘绘帀 spring 鐢?User.Spring Force=0锛堣 ApplyMorphParameters锛夈€傛柊灞炴€?BP 涓嶈鐩栥€?
 	(void)InhalationSystem;
 	MorphParticleSystem = MorphSystem.Object;
 }
@@ -74,7 +133,7 @@ void UBurstMeshStateSwitcherComponent::BeginPlay()
 	DisableLegacyTriggerAndUI();
 	PlayerController = UGameplayStatics::GetPlayerController(this, 0);
 
-	// 订阅 Leap 帧广播；用句柄精确移除，避免 Clear() 误删其它监听者。
+	// 璁㈤槄 Leap 甯у箍鎾紱鐢ㄥ彞鏌勭簿纭Щ闄わ紝閬垮厤 Clear() 璇垹鍏跺畠鐩戝惉鑰呫€?
 	if (ULeapSubsystem* LeapSubsystem = ULeapSubsystem::Get())
 	{
 		LeapFrameDelegateHandle =
@@ -124,7 +183,7 @@ void UBurstMeshStateSwitcherComponent::TickComponent(
 		ApplyInitialStateMaterials();
 	}
 
-	// 模型自转独立于输入：放在 PlayerController 判定之前，确保任何时候都能转。
+	// 妯″瀷鑷浆鐙珛浜庤緭鍏ワ細鏀惧湪 PlayerController 鍒ゅ畾涔嬪墠锛岀‘淇濅换浣曟椂鍊欓兘鑳借浆銆?
 	UpdateModelRotation(DeltaTime);
 
 	if (!PlayerController)
@@ -163,50 +222,6 @@ void UBurstMeshStateSwitcherComponent::TickComponent(
 		}
 	}
 
-	if (bFadeInActive && TargetMeshComponent)
-	{
-		FadeInElapsed += DeltaTime;
-		const float Progress = FMath::Clamp(
-			FadeInElapsed / FMath::Max(ModelFadeInDuration, 0.01f), 0.0f, 1.0f);
-		const float SmoothedProgress = FMath::SmoothStep(0.0f, 1.0f, Progress);
-		for (UMaterialInstanceDynamic* FadeMaterial : ActiveFadeMaterials)
-		{
-			if (FadeMaterial)
-			{
-				FadeMaterial->SetScalarParameterValue(
-					TEXT("Dissolve Amount"),
-					FMath::Lerp(ModelFadeStartDissolve, ModelFadeEndDissolve, SmoothedProgress));
-			}
-		}
-		if (Progress >= 1.0f)
-		{
-			CompleteTransition();
-		}
-	}
-
-	if (bSourceFadeOutActive && SourceMeshComponent)
-	{
-		SourceFadeOutElapsed += DeltaTime;
-		const float Progress = FMath::Clamp(
-			SourceFadeOutElapsed / FMath::Max(SourceFadeOutDuration, 0.01f), 0.0f, 1.0f);
-		const float Smoothed = FMath::SmoothStep(0.0f, 1.0f, Progress);
-		// 从 ModelFadeEndDissolve(1.0 完整) 溶解淡出到 ModelFadeStartDissolve(0.0 消散)
-		const float DissolveValue = FMath::Lerp(ModelFadeEndDissolve, ModelFadeStartDissolve, Smoothed);
-		for (UMaterialInstanceDynamic* FadeMaterial : ActiveSourceFadeMaterials)
-		{
-			if (FadeMaterial)
-			{
-				FadeMaterial->SetScalarParameterValue(TEXT("Dissolve Amount"), DissolveValue);
-			}
-		}
-		if (Progress >= 1.0f)
-		{
-			SourceMeshComponent->SetVisibility(false, true);
-			bSourceFadeOutActive = false;
-			ActiveSourceFadeMaterials.Reset();
-		}
-	}
-
 	if (PlayerController->WasInputKeyJustPressed(EKeys::One))
 	{
 		SwitchToStateOne();
@@ -220,7 +235,7 @@ void UBurstMeshStateSwitcherComponent::TickComponent(
 		SwitchToStateThree();
 	}
 
-	// 1/2/3 键功能保留；额外用 Leap 挥手做正反向循环切换。
+	// 1/2/3 閿姛鑳戒繚鐣欙紱棰濆鐢?Leap 鎸ユ墜鍋氭鍙嶅悜寰幆鍒囨崲銆?
 	PollLeapSwipeGestures(DeltaTime);
 }
 
@@ -231,7 +246,7 @@ void UBurstMeshStateSwitcherComponent::UpdateModelRotation(float DeltaTime)
 		return;
 	}
 
-	// 仅在没有切换过渡进行（即模型已完整显示）时自转。
+	// 浠呭湪娌℃湁鍒囨崲杩囨浮杩涜锛堝嵆妯″瀷宸插畬鏁存樉绀猴級鏃惰嚜杞€?
 	if (IsTransitionInProgress())
 	{
 		return;
@@ -240,13 +255,13 @@ void UBurstMeshStateSwitcherComponent::UpdateModelRotation(float DeltaTime)
 	UStaticMeshComponent* CurrentMesh = StateMeshComponents.IsValidIndex(CurrentStateIndex)
 		? StateMeshComponents[CurrentStateIndex]
 		: nullptr;
-	// 隐藏的模型不旋转。
+	// 闅愯棌鐨勬ā鍨嬩笉鏃嬭浆銆?
 	if (!CurrentMesh || !CurrentMesh->IsVisible())
 	{
 		return;
 	}
 
-	// 绕世界竖直轴（Z）从当前角度增量旋转。
+	// 缁曚笘鐣岀珫鐩磋酱锛圸锛変粠褰撳墠瑙掑害澧為噺鏃嬭浆銆?
 	const float DeltaYaw = RotationSpeedDegreesPerSecond * DeltaTime;
 	CurrentMesh->AddWorldRotation(FRotator(0.0f, DeltaYaw, 0.0f));
 }
@@ -259,7 +274,7 @@ bool UBurstMeshStateSwitcherComponent::IsTransitionInProgress() const
 
 void UBurstMeshStateSwitcherComponent::OnLeapTrackingData(const FLeapFrameData& Frame)
 {
-	// 仅缓存左右手最新数据；判定逻辑在 Tick 中按帧时间走冷却，便于防抖。
+	// 浠呯紦瀛樺乏鍙虫墜鏈€鏂版暟鎹紱鍒ゅ畾閫昏緫鍦?Tick 涓寜甯ф椂闂磋蛋鍐峰嵈锛屼究浜庨槻鎶栥€?
 	TimeSinceLeapFrame = 0.0f;
 	bLeftHandPresent = false;
 	bRightHandPresent = false;
@@ -282,12 +297,12 @@ void UBurstMeshStateSwitcherComponent::OnLeapTrackingData(const FLeapFrameData& 
 
 void UBurstMeshStateSwitcherComponent::PollLeapSwipeGestures(float DeltaTime)
 {
-	// 冷却计时始终递减，确保即使本帧提前返回，冷却也会正常恢复。
+	// 鍐峰嵈璁℃椂濮嬬粓閫掑噺锛岀‘淇濆嵆浣挎湰甯ф彁鍓嶈繑鍥烇紝鍐峰嵈涔熶細姝ｅ父鎭㈠銆?
 	LeftHandSwipeCooldown = FMath::Max(0.0f, LeftHandSwipeCooldown - DeltaTime);
 	RightHandSwipeCooldown = FMath::Max(0.0f, RightHandSwipeCooldown - DeltaTime);
 
-	// 数据新鲜度兜底：若 Leap 一段时间未推送新帧（设备断开/手离开视野），
-	// 视手部为不存在，避免用陈旧速度在冷却结束后反复误触发导致闪烁。
+	// 鏁版嵁鏂伴矞搴﹀厹搴曪細鑻?Leap 涓€娈垫椂闂存湭鎺ㄩ€佹柊甯э紙璁惧鏂紑/鎵嬬寮€瑙嗛噹锛夛紝
+	// 瑙嗘墜閮ㄤ负涓嶅瓨鍦紝閬垮厤鐢ㄩ檲鏃ч€熷害鍦ㄥ喎鍗寸粨鏉熷悗鍙嶅璇Е鍙戝鑷撮棯鐑併€?
 	constexpr float LeapStaleTimeout = 0.25f;
 	TimeSinceLeapFrame += DeltaTime;
 	if (TimeSinceLeapFrame > LeapStaleTimeout)
@@ -301,7 +316,7 @@ void UBurstMeshStateSwitcherComponent::PollLeapSwipeGestures(float DeltaTime)
 		return;
 	}
 
-	// 防闪烁之一：过渡进行中默认忽略新挥手，等模型完整成形后再响应。
+	// 闃查棯鐑佷箣涓€锛氳繃娓¤繘琛屼腑榛樿蹇界暐鏂版尌鎵嬶紝绛夋ā鍨嬪畬鏁存垚褰㈠悗鍐嶅搷搴斻€?
 	if (!bAllowSwipeDuringTransition && IsTransitionInProgress())
 	{
 		return;
@@ -309,19 +324,19 @@ void UBurstMeshStateSwitcherComponent::PollLeapSwipeGestures(float DeltaTime)
 
 	const float AxisSign = bInvertSwipeAxis ? -1.0f : 1.0f;
 
-	// 右手向左摆动（-Y）→ 模型 ID 反向更新。
+	// 鍙虫墜鍚戝乏鎽嗗姩锛?Y锛夆啋 妯″瀷 ID 鍙嶅悜鏇存柊銆?
 	if (bRightHandPresent && RightHandSwipeCooldown <= 0.0f
 		&& RightHandConfidence >= MinHandConfidence && IsLateralSwipe(RightPalmVelocity))
 	{
 		if (AxisSign * RightPalmVelocity.Y < 0.0f)
 		{
 			CycleModel(-1);
-			// 防闪烁之四：每手独立冷却，单次挥动不会在多帧内重复触发。
+			// 闃查棯鐑佷箣鍥涳細姣忔墜鐙珛鍐峰嵈锛屽崟娆℃尌鍔ㄤ笉浼氬湪澶氬抚鍐呴噸澶嶈Е鍙戙€?
 			RightHandSwipeCooldown = SwipeCooldownSeconds;
 		}
 	}
 
-	// 左手向右挥动（+Y）→ 模型 ID 正向更新。
+	// 宸︽墜鍚戝彸鎸ュ姩锛?Y锛夆啋 妯″瀷 ID 姝ｅ悜鏇存柊銆?
 	if (bLeftHandPresent && LeftHandSwipeCooldown <= 0.0f
 		&& LeftHandConfidence >= MinHandConfidence && IsLateralSwipe(LeftPalmVelocity))
 	{
@@ -335,8 +350,8 @@ void UBurstMeshStateSwitcherComponent::PollLeapSwipeGestures(float DeltaTime)
 
 bool UBurstMeshStateSwitcherComponent::IsLateralSwipe(const FVector& Velocity) const
 {
-	// 防闪烁之二/三：速度阈值过滤微小抖动；要求水平(左右 Y 轴)分量主导，
-	// 避免上下/前后移动被误判为挥手。
+	// 闃查棯鐑佷箣浜?涓夛細閫熷害闃堝€艰繃婊ゅ井灏忔姈鍔紱瑕佹眰姘村钩(宸﹀彸 Y 杞?鍒嗛噺涓诲锛?
+	// 閬垮厤涓婁笅/鍓嶅悗绉诲姩琚鍒や负鎸ユ墜銆?
 	const float LateralAbs = FMath::Abs(Velocity.Y);
 	if (LateralAbs < SwipeVelocityThreshold)
 	{
@@ -358,7 +373,7 @@ void UBurstMeshStateSwitcherComponent::CycleModel(int32 Direction)
 		return;
 	}
 
-	// 以有效当前态（过渡中以目标态为准）为基准做环绕循环。
+	// 浠ユ湁鏁堝綋鍓嶆€侊紙杩囨浮涓互鐩爣鎬佷负鍑嗭級涓哄熀鍑嗗仛鐜粫寰幆銆?
 	const int32 EffectiveCurrent = (PendingStateIndex != INDEX_NONE) ? PendingStateIndex : CurrentStateIndex;
 	const int32 NextIndex = ((EffectiveCurrent + Direction) % StateCount + StateCount) % StateCount;
 	UE_LOG(LogTemp, Display, TEXT("BurstMeshStateSwitcher: leap swipe cycle %s -> state %d."),
@@ -373,26 +388,88 @@ void UBurstMeshStateSwitcherComponent::ApplyInitialStateMaterials()
 		CacheOwnerComponents();
 	}
 
+	// 涓嶅啀瑕嗙洊 StaticMesh 缁勪欢涓婂凡鏈夌殑鏉愯川銆?
+	// 鏋勯€犲嚱鏁帮紙BurstSMTestActor锛夊凡涓烘瘡涓?Mesh 璁剧疆浜嗘纭殑鐜夌煶鏉愯川
+	// 锛圡I_TYS_Jade_SSS / MI_YF_Jade_SSS / MI_YZL_Jade_SSS锛夛紝
+	CaptureInitialStateMaterials();
+	for (int32 StateIndex = 0; StateIndex < StateMeshComponents.Num(); ++StateIndex)
+	{
+		RestoreStateInitialMaterials(StateIndex);
+	}
+
+	bInitialStateMaterialsApplied = true;
+	SetRuntimeStateVisibility(CurrentStateIndex);
+}
+
+void UBurstMeshStateSwitcherComponent::CaptureInitialStateMaterials()
+{
+	InitialStateMaterials.Reset();
+	InitialStateMaterialOffsets.Reset();
+	InitialStateMaterialCounts.Reset();
+
+	InitialStateMaterialOffsets.SetNum(StateMeshComponents.Num());
+	InitialStateMaterialCounts.SetNum(StateMeshComponents.Num());
+
 	for (int32 StateIndex = 0; StateIndex < StateMeshComponents.Num(); ++StateIndex)
 	{
 		UStaticMeshComponent* MeshComponent = StateMeshComponents[StateIndex];
-		UMaterialInterface* StateMaterial = StateFadeMaterials.IsValidIndex(StateIndex)
-			? StateFadeMaterials[StateIndex]
-			: nullptr;
-		if (!MeshComponent || !StateMaterial)
+		InitialStateMaterialOffsets[StateIndex] = InitialStateMaterials.Num();
+		InitialStateMaterialCounts[StateIndex] = 0;
+		if (!MeshComponent)
 		{
 			continue;
 		}
 
 		const int32 MaterialCount = FMath::Max(MeshComponent->GetNumMaterials(), 1);
+		InitialStateMaterialCounts[StateIndex] = MaterialCount;
 		for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
 		{
-			MeshComponent->SetMaterial(MaterialIndex, StateMaterial);
+			InitialStateMaterials.Add(ResolveInitialDisplayMaterial(MeshComponent, MaterialIndex, StateIndex));
+		}
+	}
+}
+
+void UBurstMeshStateSwitcherComponent::RestoreStateInitialMaterials(int32 StateIndex)
+{
+	if (!StateMeshComponents.IsValidIndex(StateIndex) || !StateMeshComponents[StateIndex]
+		|| !InitialStateMaterialOffsets.IsValidIndex(StateIndex)
+		|| !InitialStateMaterialCounts.IsValidIndex(StateIndex))
+	{
+		return;
+	}
+
+	UStaticMeshComponent* MeshComponent = StateMeshComponents[StateIndex];
+	const int32 Offset = InitialStateMaterialOffsets[StateIndex];
+	const int32 Count = InitialStateMaterialCounts[StateIndex];
+	MeshComponent->EmptyOverrideMaterials();
+	for (int32 MaterialIndex = 0; MaterialIndex < Count; ++MaterialIndex)
+	{
+		if (InitialStateMaterials.IsValidIndex(Offset + MaterialIndex)
+			&& InitialStateMaterials[Offset + MaterialIndex])
+		{
+			MeshComponent->SetMaterial(MaterialIndex, InitialStateMaterials[Offset + MaterialIndex]);
+		}
+	}
+}
+
+UMaterialInterface* UBurstMeshStateSwitcherComponent::GetStateInitialMaterial(int32 StateIndex, int32 MaterialIndex) const
+{
+	if (InitialStateMaterialOffsets.IsValidIndex(StateIndex)
+		&& InitialStateMaterialCounts.IsValidIndex(StateIndex)
+		&& MaterialIndex >= 0
+		&& MaterialIndex < InitialStateMaterialCounts[StateIndex])
+	{
+		const int32 MaterialOffset = InitialStateMaterialOffsets[StateIndex] + MaterialIndex;
+		if (InitialStateMaterials.IsValidIndex(MaterialOffset) && InitialStateMaterials[MaterialOffset])
+		{
+			return InitialStateMaterials[MaterialOffset];
 		}
 	}
 
-	bInitialStateMaterialsApplied = true;
-	SetRuntimeStateVisibility(CurrentStateIndex);
+	UStaticMeshComponent* MeshComponent = StateMeshComponents.IsValidIndex(StateIndex)
+		? StateMeshComponents[StateIndex]
+		: nullptr;
+	return ResolveInitialDisplayMaterial(MeshComponent, MaterialIndex, StateIndex);
 }
 
 void UBurstMeshStateSwitcherComponent::CacheOwnerComponents()
@@ -435,7 +512,7 @@ void UBurstMeshStateSwitcherComponent::CacheOwnerComponents()
 	TransformationNiagara = Owner->FindComponentByClass<UNiagaraComponent>();
 	if (TransformationNiagara)
 	{
-		// 始终使用网格变形系统（P_Morph_5_SM）。MorphParticleSystem 是新属性，BP 实例不会覆盖。
+		// 濮嬬粓浣跨敤缃戞牸鍙樺舰绯荤粺锛圥_Morph_5_SM锛夈€侻orphParticleSystem 鏄柊灞炴€э紝BP 瀹炰緥涓嶄細瑕嗙洊銆?
 		if (!MorphParticleSystem)
 		{
 			MorphParticleSystem = LoadObject<UNiagaraSystem>(
@@ -458,7 +535,9 @@ void UBurstMeshStateSwitcherComponent::SetRuntimeStateVisibility(int32 VisibleSt
 	{
 		if (UStaticMeshComponent* MeshComponent = StateMeshComponents[Index])
 		{
-			MeshComponent->SetVisibility(Index == VisibleStateIndex, true);
+			const bool bShouldBeVisible = (Index == VisibleStateIndex);
+			MeshComponent->SetVisibility(bShouldBeVisible, true);
+			MeshComponent->SetHiddenInGame(!bShouldBeVisible, true);
 		}
 	}
 }
@@ -496,7 +575,7 @@ void UBurstMeshStateSwitcherComponent::ApplyParticleSettings()
 		return;
 	}
 
-	// P_Morph_5_SM 用 User.Static Mesh0 作为源形状、User.Static Mesh1 作为目标形状。
+	// P_Morph_5_SM 鐢?User.Static Mesh0 浣滀负婧愬舰鐘躲€乁ser.Static Mesh1 浣滀负鐩爣褰㈢姸銆?
 	if (SourceMeshComponent)
 	{
 		UNiagaraFunctionLibrary::OverrideSystemUserVariableStaticMeshComponent(
@@ -510,22 +589,22 @@ void UBurstMeshStateSwitcherComponent::ApplyParticleSettings()
 	TransformationNiagara->SetRelativeLocation(NiagaraBaseLocation + ParticleLocationOffset);
 	TransformationNiagara->SetRelativeRotation(NiagaraBaseRotation + ParticleRotationOffset);
 	TransformationNiagara->SetRelativeScale3D(NiagaraBaseScale * ParticleNonUniformScale);
-	// 去掉 Spring 力（保留 Noise）：让粒子涡流向外消散而非弹回目标。
+	// 鍘绘帀 Spring 鍔涳紙淇濈暀 Noise锛夛細璁╃矑瀛愭丁娴佸悜澶栨秷鏁ｈ€岄潪寮瑰洖鐩爣銆?
 	TransformationNiagara->SetVariableFloat(TEXT("User.Spring Force"), 0.0f);
-	// 粒子颜色 = 目标模型玉石材质：把目标状态的玉石材质设到 User.ParticleMaterial，
-	// （需在 Niagara 里把 Sprite Renderer 的 Material 绑定到 User 参数 ParticleMaterial）。
+	// 绮掑瓙棰滆壊 = 鐩爣妯″瀷鐜夌煶鏉愯川锛氭妸鐩爣鐘舵€佺殑鐜夌煶鏉愯川璁惧埌 User.ParticleMaterial锛?
+	// 锛堥渶鍦?Niagara 閲屾妸 Sprite Renderer 鐨?Material 缁戝畾鍒?User 鍙傛暟 ParticleMaterial锛夈€?
 	const int32 TargetStateIdx = (PendingStateIndex != INDEX_NONE) ? PendingStateIndex : CurrentStateIndex;
-	if (StateFadeMaterials.IsValidIndex(TargetStateIdx) && StateFadeMaterials[TargetStateIdx])
+	if (UMaterialInterface* TargetMaterial = GetStateInitialMaterial(TargetStateIdx))
 	{
-		TransformationNiagara->SetVariableMaterial(
-			TEXT("User.ParticleMaterial"), StateFadeMaterials[TargetStateIdx]);
+		TransformationNiagara->SetVariableMaterial(TEXT("User.ParticleMaterial"), TargetMaterial);
+		TransformationNiagara->SetVariableMaterial(TEXT("User.Particle Material"), TargetMaterial);
 	}
 	ApplyMorphParameters();
 }
 
 void UBurstMeshStateSwitcherComponent::ApplyMorphParameters()
 {
-	// 仅在显式开启时覆盖（保留给 P_Morph 系列系统的可选调参，吸入系统下无副作用）。
+	// 浠呭湪鏄惧紡寮€鍚椂瑕嗙洊锛堜繚鐣欑粰 P_Morph 绯诲垪绯荤粺鐨勫彲閫夎皟鍙傦紝鍚稿叆绯荤粺涓嬫棤鍓綔鐢級銆?
 	if (!TransformationNiagara || !bOverrideMorphParameters)
 	{
 		return;
@@ -575,8 +654,8 @@ void UBurstMeshStateSwitcherComponent::SwitchToStateThree()
 
 void UBurstMeshStateSwitcherComponent::SwitchToState(int32 StateIndex)
 {
-	// 有效当前态：过渡中以正在切往的目标(PendingStateIndex)为准，否则为已显示态(CurrentStateIndex)。
-	// 防止过渡中再按同一个目标键重复触发。
+	// 鏈夋晥褰撳墠鎬侊細杩囨浮涓互姝ｅ湪鍒囧線鐨勭洰鏍?PendingStateIndex)涓哄噯锛屽惁鍒欎负宸叉樉绀烘€?CurrentStateIndex)銆?
+	// 闃叉杩囨浮涓啀鎸夊悓涓€涓洰鏍囬敭閲嶅瑙﹀彂銆?
 	const int32 EffectiveCurrent = (PendingStateIndex != INDEX_NONE) ? PendingStateIndex : CurrentStateIndex;
 	if (StateIndex == EffectiveCurrent)
 	{
@@ -616,7 +695,7 @@ void UBurstMeshStateSwitcherComponent::SwitchToState(int32 StateIndex)
 		ActiveSourceFadeMaterials.Reset();
 	}
 
-	// 以真正的当前显示态为源；并强制只显示它（隐藏任何上一次过渡残留的网格）。
+	// 浠ョ湡姝ｇ殑褰撳墠鏄剧ず鎬佷负婧愶紱骞跺己鍒跺彧鏄剧ず瀹冿紙闅愯棌浠讳綍涓婁竴娆¤繃娓℃畫鐣欑殑缃戞牸锛夈€?
 	SourceMeshComponent = StateMeshComponents.IsValidIndex(CurrentStateIndex)
 		? StateMeshComponents[CurrentStateIndex]
 		: SourceMeshComponent;
@@ -632,17 +711,18 @@ void UBurstMeshStateSwitcherComponent::SwitchToState(int32 StateIndex)
 	{
 		TransformationNiagara->SetAsset(MorphParticleSystem);
 	}
-	// 先设源/目标网格再重置系统，重置后再设一次，确保数据接口在重新初始化后拿到正确的网格。
+	// 鍏堣婧?鐩爣缃戞牸鍐嶉噸缃郴缁燂紝閲嶇疆鍚庡啀璁句竴娆★紝纭繚鏁版嵁鎺ュ彛鍦ㄩ噸鏂板垵濮嬪寲鍚庢嬁鍒版纭殑缃戞牸銆?
 	ApplyParticleSettings();
 	TransformationNiagara->ReinitializeSystem();
 	ApplyParticleSettings();
+	TransformationNiagara->SetHiddenInGame(false, true);
 	TransformationNiagara->SetVisibility(true, true);
 	TransformationNiagara->Activate(true);
 
 	if (UWorld* World = GetWorld())
 	{
 		const float EffectiveDuration = FMath::Max(FrontHalfDuration, 0.1f);
-		// 变形系统自带粒子运动，不需要逐帧驱动 Transformation Alpha。
+		// 鍙樺舰绯荤粺鑷甫绮掑瓙杩愬姩锛屼笉闇€瑕侀€愬抚椹卞姩 Transformation Alpha銆?
 		bTransitionActive = false;
 		World->GetTimerManager().SetTimer(
 			HideSourceTimer, this, &UBurstMeshStateSwitcherComponent::BeginSourceFadeOut, SourceHideDelay, false);
@@ -666,37 +746,12 @@ void UBurstMeshStateSwitcherComponent::BeginSourceFadeOut()
 		return;
 	}
 
-	// 用旧模型当前状态的玉石溶解材质，做一个 Dissolve 1.0(完整)->0.0(消散) 的淡出。
 	ActiveSourceFadeMaterials.Reset();
-	UMaterialInterface* FadeMaterial =
-		StateFadeMaterials.IsValidIndex(CurrentStateIndex) && StateFadeMaterials[CurrentStateIndex]
-			? StateFadeMaterials[CurrentStateIndex]
-			: FallbackModelFadeMaterial;
-	if (FadeMaterial)
-	{
-		const int32 MaterialCount = FMath::Max(SourceMeshComponent->GetNumMaterials(), 1);
-		for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
-		{
-			if (UMaterialInstanceDynamic* FadeMID = SourceMeshComponent->CreateDynamicMaterialInstance(
-				MaterialIndex, FadeMaterial))
-			{
-				FadeMID->SetScalarParameterValue(TEXT("Dissolve Amount"), ModelFadeEndDissolve);
-				ActiveSourceFadeMaterials.Add(FadeMID);
-			}
-		}
-	}
-
-	if (ActiveSourceFadeMaterials.IsEmpty())
-	{
-		// 没有可用溶解材质就回退到直接隐藏，避免旧模型一直留在画面上。
-		SourceMeshComponent->SetVisibility(false, true);
-		return;
-	}
-
-	SourceFadeOutElapsed = 0.0f;
-	bSourceFadeOutActive = true;
-	UE_LOG(LogTemp, Display,
-		TEXT("BurstMeshStateSwitcher: source model dissolving out over %.2fs."), SourceFadeOutDuration);
+	RestoreStateInitialMaterials(CurrentStateIndex);
+	SourceMeshComponent->SetVisibility(false, true);
+	SourceMeshComponent->SetHiddenInGame(true, true);
+	bSourceFadeOutActive = false;
+	UE_LOG(LogTemp, Display, TEXT("BurstMeshStateSwitcher: source model hidden; particles carry the transition."));
 }
 
 void UBurstMeshStateSwitcherComponent::BeginModelReveal()
@@ -706,21 +761,21 @@ void UBurstMeshStateSwitcherComponent::BeginModelReveal()
 		return;
 	}
 
-	// 注意：CurrentStateIndex 不在这里更新，必须等目标真正显示后（CompleteTransition）才切换，
-	// 否则快速切换被打断时会残留上一个目标网格，导致两个模型同时出现。
+	// 娉ㄦ剰锛欳urrentStateIndex 涓嶅湪杩欓噷鏇存柊锛屽繀椤荤瓑鐩爣鐪熸鏄剧ず鍚庯紙CompleteTransition锛夋墠鍒囨崲锛?
+	// 鍚﹀垯蹇€熷垏鎹㈣鎵撴柇鏃朵細娈嬬暀涓婁竴涓洰鏍囩綉鏍硷紝瀵艰嚧涓や釜妯″瀷鍚屾椂鍑虹幇銆?
 	bTransitionActive = false;
 
 	TargetMeshComponent->EmptyOverrideMaterials();
-	// 过渡期间所有状态网格都隐藏（粒子代表过渡），目标等粒子消散后再揭示。
+	// 杩囨浮鏈熼棿鎵€鏈夌姸鎬佺綉鏍奸兘闅愯棌锛堢矑瀛愪唬琛ㄨ繃娓★級锛岀洰鏍囩瓑绮掑瓙娑堟暎鍚庡啀鎻ず銆?
 	SetRuntimeStateVisibility(INDEX_NONE);
 
-	// 停止粒子继续生成，让现有粒子按自身生命周期自然消散。
+	// 鍋滄绮掑瓙缁х画鐢熸垚锛岃鐜版湁绮掑瓙鎸夎嚜韬敓鍛藉懆鏈熻嚜鐒舵秷鏁ｃ€?
 	if (TransformationNiagara)
 	{
 		TransformationNiagara->Deactivate();
 	}
 
-	// 粒子完全消散后（ParticleFadeOutDuration）才显示新模型完整材质。
+	// 绮掑瓙瀹屽叏娑堟暎鍚庯紙ParticleFadeOutDuration锛夋墠鏄剧ず鏂版ā鍨嬪畬鏁存潗璐ㄣ€?
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().SetTimer(
@@ -734,54 +789,25 @@ void UBurstMeshStateSwitcherComponent::BeginModelReveal()
 
 void UBurstMeshStateSwitcherComponent::FinishParticlesAndRevealTarget()
 {
-	// 粒子动画结束：先彻底隐藏/清理粒子，再揭示新模型完整材质。
+	// 绮掑瓙鍔ㄧ敾缁撴潫锛氬厛褰诲簳闅愯棌/娓呯悊绮掑瓙锛屽啀鎻ず鏂版ā鍨嬪畬鏁存潗璐ㄣ€?
 	StopAndHideParticles();
 	BeginTargetModelFadeIn();
 }
 
 void UBurstMeshStateSwitcherComponent::BeginTargetModelFadeIn()
 {
-	if (!TargetMeshComponent)
+	if (!TargetMeshComponent || PendingStateIndex == INDEX_NONE)
 	{
 		return;
 	}
 
-	UE_LOG(LogTemp, Display, TEXT("BurstMeshStateSwitcher: particle fade complete; beginning target model fade in."));
+	UE_LOG(LogTemp, Display, TEXT("BurstMeshStateSwitcher: particle fade complete; revealing target model with initial material."));
 	ActiveFadeMaterials.Reset();
-	// 目标状态用 PendingStateIndex（CurrentStateIndex 此时还是源，未切换）。
-	UMaterialInterface* ModelFadeMaterial =
-		StateFadeMaterials.IsValidIndex(PendingStateIndex) && StateFadeMaterials[PendingStateIndex]
-			? StateFadeMaterials[PendingStateIndex]
-			: FallbackModelFadeMaterial;
-	if (ModelFadeMaterial)
-	{
-		const int32 MaterialCount = FMath::Max(TargetMeshComponent->GetNumMaterials(), 1);
-		for (int32 MaterialIndex = 0; MaterialIndex < MaterialCount; ++MaterialIndex)
-		{
-			if (UMaterialInstanceDynamic* FadeMaterial = TargetMeshComponent->CreateDynamicMaterialInstance(
-				MaterialIndex, ModelFadeMaterial))
-			{
-				FadeMaterial->SetScalarParameterValue(TEXT("Dissolve Amount"), ModelFadeStartDissolve);
-				ActiveFadeMaterials.Add(FadeMaterial);
-			}
-		}
-	}
-	if (ActiveFadeMaterials.IsEmpty())
-	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("BurstMeshStateSwitcher: state %d has no model fade material; target remains hidden."),
-			PendingStateIndex + 1);
-		return;
-	}
-
-	FadeInElapsed = 0.0f;
-	bFadeInActive = true;
+	RestoreStateInitialMaterials(PendingStateIndex);
+	bFadeInActive = false;
 	bFadeRevealPending = false;
-	// 只显示目标网格，强制隐藏其它所有状态网格，确保任何时刻只有一个模型可见。
 	SetRuntimeStateVisibility(PendingStateIndex);
-	UE_LOG(LogTemp, Display,
-		TEXT("BurstMeshStateSwitcher: target revealed with dissolve %.2f; animating to %.2f over %.2fs."),
-		ModelFadeStartDissolve, ModelFadeEndDissolve, ModelFadeInDuration);
+	CompleteTransition();
 }
 
 void UBurstMeshStateSwitcherComponent::BeginParticleFadeOut()
@@ -800,10 +826,11 @@ void UBurstMeshStateSwitcherComponent::StopAndHideParticles()
 {
 	if (TransformationNiagara)
 	{
-		// 用 Deactivate（停止生成、保留已存在粒子自然消散）而不是 DeactivateImmediate（瞬间清空），
-		// 保持柔和淡出的观感。
+		// 鐢?Deactivate锛堝仠姝㈢敓鎴愩€佷繚鐣欏凡瀛樺湪绮掑瓙鑷劧娑堟暎锛夎€屼笉鏄?DeactivateImmediate锛堢灛闂存竻绌猴級锛?
+		// 淇濇寔鏌斿拰娣″嚭鐨勮鎰熴€?
 		TransformationNiagara->Deactivate();
 		TransformationNiagara->SetVisibility(false, true);
+		TransformationNiagara->SetHiddenInGame(true, true);
 	}
 	bParticleFadeOutActive = false;
 	ParticleFadeOutElapsed = 0.0f;
@@ -814,18 +841,11 @@ void UBurstMeshStateSwitcherComponent::CompleteTransition()
 {
 	if (TargetMeshComponent)
 	{
-		for (UMaterialInstanceDynamic* FadeMaterial : ActiveFadeMaterials)
-		{
-			if (FadeMaterial)
-			{
-				FadeMaterial->SetScalarParameterValue(TEXT("Dissolve Amount"), ModelFadeEndDissolve);
-			}
-		}
-		// 过渡真正完成：现在才把当前状态切到目标，并强制只显示它（隐藏其余），杜绝两个同时出现。
-		if (PendingStateIndex != INDEX_NONE)
+		// 杩囨浮鐪熸瀹屾垚锛氱幇鍦ㄦ墠鎶婂綋鍓嶇姸鎬佸垏鍒扮洰鏍囷紝骞跺己鍒跺彧鏄剧ず瀹冿紙闅愯棌鍏朵綑锛夛紝鏉滅粷涓や釜鍚屾椂鍑虹幇銆?		if (PendingStateIndex != INDEX_NONE)
 		{
 			CurrentStateIndex = PendingStateIndex;
 		}
+		// 杩囨浮瀹屾垚锛氭仮澶嶇洰鏍囨ā鍨嬪湪鍏冲崱瀹炰緥/钃濆浘妯℃澘涓殑鍒濆鏉愯川銆?		RestoreStateInitialMaterials(CurrentStateIndex);
 		SourceMeshComponent = TargetMeshComponent;
 		TargetMeshComponent = nullptr;
 		SetRuntimeStateVisibility(CurrentStateIndex);

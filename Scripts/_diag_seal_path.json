@@ -1,0 +1,39 @@
+{
+  "actor": "Chinese_Seal_Pool_Animator",
+  "actor_location": [
+    450.0,
+    0.0,
+    162.5
+  ],
+  "seal_meshes_count": 20,
+  "seal_meshes": [
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Shui.SM_Seal_Shui",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Guang.SM_Seal_Guang",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Ying.SM_Seal_Ying",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Feng.SM_Seal_Feng",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Yun.SM_Seal_Yun",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Shi.SM_Seal_Shi",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Huo.SM_Seal_Huo",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Shan.SM_Seal_Shan",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Hai.SM_Seal_Hai",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Lin.SM_Seal_Lin",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Lei.SM_Seal_Lei",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Dian.SM_Seal_Dian",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Yu.SM_Seal_Yu",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Xue.SM_Seal_Xue",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Yue.SM_Seal_Yue",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Ri.SM_Seal_Ri",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Xing.SM_Seal_Xing",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Tian.SM_Seal_Tian",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Di.SM_Seal_Di",
+    "/Game/TransformationVFX/SM2SM/ChineseSeals/SM_Seal_Chuan.SM_Seal_Chuan"
+  ],
+  "static_components": 72,
+  "procedural_components": 0,
+  "component_classes": {
+    "StaticMeshComponent": 72
+  },
+  "sample_bounds": {
+    "error": "'StaticMeshComponent' object has no attribute 'get_relative_scale3d'"
+  }
+}

@@ -55,12 +55,27 @@ struct FJade
         return frac(sin(p) * 43758.5453);
     }
 
-    // 不规则点状沁色：Worley/胞状噪声。每个胞内随机点位、随机半径并按随机概率缺省，
-    // 形成大小不一、分布无规律的斑点，取代原先的正弦条纹。
+    // 可调参数（由材质参数经 struct 成员传入）：轮廓不规则度 / 边缘锯齿强度 / 锯齿细度。
+    float WarpAmount;
+    float EdgeRough;
+    float EdgeDetail;
+
+    // 不规则点状沁色：Worley/胞状噪声 + 域扭曲 + 高频边缘扰动。
+    // 域扭曲让斑点轮廓不是规则圆形；高频噪声叠加到距离场让边缘呈不平滑的锯齿状，更像天然玉石沁色。
     float SpotField(float2 uv, float contrast)
     {
-        float2 g = floor(uv);
-        float2 f = frac(uv);
+        // 1) 低频域扭曲：整体推移采样坐标，破坏圆形轮廓、打散分布。WarpAmount 越大越不规则。
+        float2 warp = float2(
+            FBM(float3(uv * 2.3 + 11.5, 0.0)),
+            FBM(float3(uv * 2.3 + 41.7, 9.0))) - 0.5;
+        float2 wuv = uv + warp * WarpAmount;
+
+        // 2) 高频细节：叠加到距离场上 → 斑点边缘变成不规则锯齿。EdgeRough=强度，EdgeDetail=细度(频率)。
+        float edgeWobble = (FBM(float3(uv * 8.0 * EdgeDetail, 3.0)) - 0.5) * 0.26 * EdgeRough
+                         + (FBM(float3(uv * 17.0 * EdgeDetail, 21.0)) - 0.5) * 0.12 * EdgeRough;
+
+        float2 g = floor(wuv);
+        float2 f = frac(wuv);
         float coverage = 0.0;
         [unroll] for (int y = -1; y <= 1; ++y)
         {
@@ -68,10 +83,11 @@ struct FJade
             {
                 float2 cell = float2(x, y);
                 float2 rnd = Hash22(g + cell);
-                float d = length(cell + rnd - f);
+                float d = length(cell + rnd - f) + edgeWobble;
                 float present = step(0.40, frac(rnd.x * 1.3 + rnd.y * 2.7));
-                float radius = lerp(0.08, 0.34, frac(rnd.x * 7.1)) * present;
-                float edge = lerp(0.14, 0.025, saturate(contrast));
+                float radius = lerp(0.10, 0.40, frac(rnd.x * 7.1)) * present;
+                // 边缘过渡宽度由 contrast(Ochre Stain Contrast) 控制：越大越锐。
+                float edge = lerp(0.05, 0.015, saturate(contrast));
                 coverage = max(coverage, 1.0 - smoothstep(radius - edge, radius, d));
             }
         }
@@ -117,6 +133,9 @@ struct FJade
 };
 
 FJade Jade;
+Jade.WarpAmount = StainWarpAmount;
+Jade.EdgeRough = StainEdgeRoughness;
+Jade.EdgeDetail = StainEdgeDetail;
 return Jade.Render(
     Position, StainUV, NoiseScale, VeinScale, StainAmount, StainScale, StainContrast, Cloudiness,
     RoughnessMin, RoughnessMax, BodyColor, PaleColor, OchreColor);
@@ -175,23 +194,33 @@ unreal.EditorAssetLibrary.save_loaded_asset(profile)
 asset_editor_subsystem = unreal.get_editor_subsystem(unreal.AssetEditorSubsystem)
 actor_subsystem = unreal.get_editor_subsystem(unreal.EditorActorSubsystem)
 
-# 关闭所有打开的资产编辑器：材质编辑器/材质实例编辑器会把材质加入 root set，
-# 否则 delete_all_material_expressions 会触发 Assertion !IsRooted() 崩溃。
-# 注意必须关“全部”编辑器——多个 MI_YZL_Jade_*_SSS 实例编辑器都会 root 住父材质。
-# （close_all_asset_editors 未暴露给 Python，用 get_all_edited_assets 逐个关闭。）
-try:
-    for opened in asset_editor_subsystem.get_all_edited_assets():
-        asset_editor_subsystem.close_all_editors_for_asset(opened)
-except Exception as exc:  # API 不可用时忽略，靠下方原地修改尽量进行
-    unreal.log_warning(f"[JadeSSS] 关闭资产编辑器异常（忽略继续）：{exc}")
-
-# 关键：原地修改父材质，绝不 delete_asset。M_YZL_ProceduralJade_SSS 是多个材质实例
-# （MI_YZL_AncientJade、MI_YZL_Jade_YF/TYS/YZL_SSS）的共享父材质，删除会孤立它们 → 棋盘格。
+# UE5.7 下 delete_all_material_expressions 在本材质上会触发 MarkAsGarbage 的 check(!IsRooted())
+# 崩溃（某个表达式被 root 住，关编辑器/无头都无法规避）。改用 delete_asset 整资产删除重建
+# （走 ObjectTools 强删，不触发该断言）。delete_asset 会孤立以本材质为父的实例，
+# 因此【删除前自动扫描】jude 与 BurstJade 两个文件夹里所有以它为父的材质实例，重建后精确重挂。
+_scan_folders = [
+    "/Game/TransformationVFX/SM2SM/jude",
+    "/Game/TransformationVFX/SM2SM/jude/BurstJade",
+]
+child_instance_paths = []
 if unreal.EditorAssetLibrary.does_asset_exist(material_path):
-    material = unreal.load_asset(material_path)
-    mel.delete_all_material_expressions(material)
-else:
-    material = tools.create_asset(MATERIAL_NAME, ASSET_DIR, unreal.Material, unreal.MaterialFactoryNew())
+    old_material = unreal.load_asset(material_path)
+    for _folder in _scan_folders:
+        if not unreal.EditorAssetLibrary.does_directory_exist(_folder):
+            continue
+        for _asset_path in unreal.EditorAssetLibrary.list_assets(_folder, recursive=False, include_folder=False):
+            _clean = _asset_path.split(".")[0]
+            _obj = unreal.load_asset(_clean)
+            if isinstance(_obj, unreal.MaterialInstanceConstant) and _obj.get_editor_property("parent") == old_material:
+                child_instance_paths.append(_clean)
+    unreal.log(f"[JadeSSS] Found {len(child_instance_paths)} child instance(s) parented to the jade material: {child_instance_paths}")
+    # 关闭所有相关编辑器（无头模式下本就无编辑器，best-effort）。
+    asset_editor_subsystem.close_all_editors_for_asset(old_material)
+    unreal.EditorAssetLibrary.delete_asset(material_path)
+
+if unreal.EditorAssetLibrary.does_asset_exist(material_path):
+    raise RuntimeError("旧材质删除失败（仍被占用）。请关闭编辑器后用无头脚本重试。")
+material = tools.create_asset(MATERIAL_NAME, ASSET_DIR, unreal.Material, unreal.MaterialFactoryNew())
 material.set_editor_property("shading_model", unreal.MaterialShadingModel.MSM_SUBSURFACE)
 material.set_editor_property("two_sided", False)
 
@@ -204,6 +233,10 @@ stain_amount = scalar(material, "Ochre Stain Amount", 0.345334, -1600, -400)
 # UV 空间下 StainScale 表示斑点平铺次数（数值越大斑点越密越小）。
 stain_scale = scalar(material, "Ochre Stain Scale", 6.0, -1600, -350)
 stain_contrast = scalar(material, "Ochre Stain Contrast", 0.4, -1600, -325)
+# 斑点形状可调参数（材质实例里直接拖）：轮廓不规则度 / 边缘锯齿强度 / 锯齿细度。
+stain_warp = scalar(material, "Stain Warp Amount", 0.9, -1600, -315)
+stain_edge_rough = scalar(material, "Stain Edge Roughness", 1.0, -1600, -312)
+stain_edge_detail = scalar(material, "Stain Edge Detail", 1.0, -1600, -309)
 cloudiness = scalar(material, "Cloudiness", 0.26, -1600, -300)
 rough_min = scalar(material, "Polished Roughness", 0.020666, -1600, -200)
 rough_max = scalar(material, "Weathered Roughness", 0.32, -1600, -100)
@@ -217,7 +250,8 @@ custom.set_editor_property("code", HLSL)
 custom.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT4)
 input_names = [
     "Position", "StainUV", "NoiseScale", "VeinScale", "StainAmount", "StainScale", "StainContrast", "Cloudiness",
-    "RoughnessMin", "RoughnessMax", "BodyColor", "PaleColor", "OchreColor"
+    "RoughnessMin", "RoughnessMax", "BodyColor", "PaleColor", "OchreColor",
+    "StainWarpAmount", "StainEdgeRoughness", "StainEdgeDetail"
 ]
 inputs = []
 for name in input_names:
@@ -227,7 +261,8 @@ for name in input_names:
 custom.set_editor_property("inputs", inputs)
 sources = [
     position, tex_coord, noise_scale, vein_scale, stain_amount, stain_scale, stain_contrast, cloudiness,
-    rough_min, rough_max, body_color, pale_color, ochre_color
+    rough_min, rough_max, body_color, pale_color, ochre_color,
+    stain_warp, stain_edge_rough, stain_edge_detail
 ]
 for source, name in zip(sources, input_names):
     mel.connect_material_expressions(source, "", custom, name)
@@ -278,10 +313,37 @@ struct FStain
         p = float2(dot(p, float2(127.1, 311.7)), dot(p, float2(269.5, 183.3)));
         return frac(sin(p) * 43758.5453);
     }
+    float Hash21(float2 p)
+    {
+        p = frac(p * float2(123.34, 345.45));
+        p += dot(p, p + 34.345);
+        return frac(p.x * p.y);
+    }
+    // 2D 值噪声，用于域扭曲与边缘扰动（FStain 内自带，不依赖 FJade）。
+    float VNoise(float2 p)
+    {
+        float2 i = floor(p);
+        float2 f = frac(p);
+        f = f * f * (3.0 - 2.0 * f);
+        float a = Hash21(i);
+        float b = Hash21(i + float2(1.0, 0.0));
+        float c = Hash21(i + float2(0.0, 1.0));
+        float d = Hash21(i + float2(1.0, 1.0));
+        return lerp(lerp(a, b, f.x), lerp(c, d, f.x), f.y);
+    }
+    float WarpAmount;
+    float EdgeRough;
+    float EdgeDetail;
     float SpotField(float2 uv, float contrast)
     {
-        float2 g = floor(uv);
-        float2 f = frac(uv);
+        // 域扭曲打散圆形轮廓 + 高频噪声扰动距离场做不平滑边缘（与 BaseColor 沁色一致，参数同源）。
+        float2 warp = float2(VNoise(uv * 2.3 + 11.5), VNoise(uv * 2.3 + 41.7)) - 0.5;
+        float2 wuv = uv + warp * WarpAmount;
+        float edgeWobble = (VNoise(uv * 8.0 * EdgeDetail) - 0.5) * 0.26 * EdgeRough
+                         + (VNoise(uv * 17.0 * EdgeDetail) - 0.5) * 0.12 * EdgeRough;
+
+        float2 g = floor(wuv);
+        float2 f = frac(wuv);
         float coverage = 0.0;
         [unroll] for (int y = -1; y <= 1; ++y)
         {
@@ -289,10 +351,10 @@ struct FStain
             {
                 float2 cell = float2(x, y);
                 float2 rnd = Hash22(g + cell);
-                float d = length(cell + rnd - f);
+                float d = length(cell + rnd - f) + edgeWobble;
                 float present = step(0.40, frac(rnd.x * 1.3 + rnd.y * 2.7));
-                float radius = lerp(0.08, 0.34, frac(rnd.x * 7.1)) * present;
-                float edge = lerp(0.14, 0.025, saturate(contrast));
+                float radius = lerp(0.10, 0.40, frac(rnd.x * 7.1)) * present;
+                float edge = lerp(0.05, 0.015, saturate(contrast));
                 coverage = max(coverage, 1.0 - smoothstep(radius - edge, radius, d));
             }
         }
@@ -306,11 +368,15 @@ struct FStain
     }
 };
 FStain S;
+S.WarpAmount = StainWarpAmount;
+S.EdgeRough = StainEdgeRoughness;
+S.EdgeDetail = StainEdgeDetail;
 return S.Eval(StainUV, StainScale, StainContrast, StainAmount);
 """)
 stain_mask.set_editor_property("output_type", unreal.CustomMaterialOutputType.CMOT_FLOAT1)
 stain_mask_inputs = []
-for name in ["StainUV", "StainScale", "StainContrast", "StainAmount"]:
+for name in ["StainUV", "StainScale", "StainContrast", "StainAmount",
+             "StainWarpAmount", "StainEdgeRoughness", "StainEdgeDetail"]:
     item = unreal.CustomInput()
     item.set_editor_property("input_name", name)
     stain_mask_inputs.append(item)
@@ -320,6 +386,9 @@ for source, name in [
     (stain_scale, "StainScale"),
     (stain_contrast, "StainContrast"),
     (stain_amount, "StainAmount"),
+    (stain_warp, "StainWarpAmount"),
+    (stain_edge_rough, "StainEdgeRoughness"),
+    (stain_edge_detail, "StainEdgeDetail"),
 ]:
     mel.connect_material_expressions(source, "", stain_mask, name)
 
@@ -348,14 +417,11 @@ unreal.MaterialEditingLibrary.set_material_instance_parent(instance, material)
 unreal.MaterialEditingLibrary.update_material_instance(instance)
 unreal.EditorAssetLibrary.save_loaded_asset(instance)
 
-# 重新挂接所有以该程序化玉石材质为父的 SSS 材质实例（BP_Burst_SM 的三个状态材质等），
-# 并把语义已变的 UV 沁色参数设为合理值，确保它们跟随父材质更新、不掉父级。
-CHILD_SSS_INSTANCES = [
-    "/Game/TransformationVFX/SM2SM/jude/BurstJade/MI_YZL_Jade_YF_SSS",
-    "/Game/TransformationVFX/SM2SM/jude/BurstJade/MI_YZL_Jade_TYS_SSS",
-    "/Game/TransformationVFX/SM2SM/jude/BurstJade/MI_YZL_Jade_YZL_SSS",
-]
-for child_path in CHILD_SSS_INSTANCES:
+# 把删除前自动扫描到的所有子实例重新挂回新父材质（auto-discovered，不依赖名字），
+# 并把语义已变的 UV 沁色参数设为合理值，确保它们跟随父材质、不掉父级（否则棋盘格）。
+for child_path in child_instance_paths:
+    if child_path == instance_path:  # 主实例已在上面处理
+        continue
     if not unreal.EditorAssetLibrary.does_asset_exist(child_path):
         continue
     child = unreal.load_asset(child_path)

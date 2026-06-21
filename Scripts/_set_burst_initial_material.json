@@ -1,0 +1,13 @@
+{
+  "actor_found": true,
+  "material": "/Game/TransformationVFX/SM2SM/jude/BurstJade/MI_YF_Jade_TYS_SSS",
+  "actions": [
+    "set StateFadeMaterials[0] for runtime initial load",
+    "hide TRASH_StaticMeshComponent_16",
+    "hide TRASH_StaticMeshComponent_17",
+    "hide TRASH_StaticMeshComponent_15",
+    "stop and hide Niagara"
+  ],
+  "save_current_level": true,
+  "save_dirty_packages": true
+}

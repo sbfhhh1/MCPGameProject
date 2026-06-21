@@ -1,0 +1,15 @@
+{
+  "asset": "/Game/TransformationVFX/SM2SM/ChineseSeals/M_ChineseSeal_DefaultWhite",
+  "saved": true,
+  "base_color": [
+    1.0,
+    1.0,
+    1.0,
+    1.0
+  ],
+  "metallic": 0.0,
+  "roughness": 0.5,
+  "specular": 0.5,
+  "shading": "DefaultLit",
+  "blend": "Opaque"
+}

@@ -1,0 +1,13 @@
+{
+  "actor_label": "Chinese_Seal_Pool_Animator",
+  "actor_name": "ChineseSealPoolAnimator_0",
+  "class": "ChineseSealPoolAnimator",
+  "location": [
+    350.0,
+    0.0,
+    60.0
+  ],
+  "rows": 4,
+  "columns": 4,
+  "source": "Content/TransformationVFX/SM2SM/ChineseSeals/chinese_seals_meshes.json"
+}

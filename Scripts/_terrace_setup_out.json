@@ -1,0 +1,21 @@
+{
+  "spawned": "BlenderGeometryNodesActor_2",
+  "label": "Terrace_Terrain",
+  "location": [
+    150.0,
+    0.0,
+    160.0
+  ],
+  "rotation": [
+    -90.0,
+    0.0,
+    0.0
+  ],
+  "scale": [
+    1.5,
+    1.5,
+    1.5
+  ],
+  "blend": "C:/UE_Project/MCPGameProject/Content/BlenderFile/terrace_terrain_gn.blend",
+  "wall_added": true
+}

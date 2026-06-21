@@ -1,0 +1,14 @@
+{
+  "seal_actor_count": 0,
+  "unique_meshes": [],
+  "duplicates": {},
+  "pool_actors": [
+    {
+      "name": "ChineseSealPoolAnimator_5",
+      "label": "Chinese_Seal_Pool_Animator",
+      "proc": 128,
+      "static": 0
+    }
+  ],
+  "all_seals": []
+}

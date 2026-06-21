@@ -1,0 +1,31 @@
+{
+  "destroyed": 0,
+  "defaults": {
+    "Rows": 16,
+    "Columns": 8,
+    "RowSpacing": 25.0,
+    "ColumnSpacing": 25.0,
+    "SealScale": 0.32,
+    "SealHeightToSectionRatio": 2.0,
+    "HeightAboveWater": 3.0,
+    "DefaultSealColor": [
+      1.0,
+      1.0,
+      1.0,
+      1.0
+    ],
+    "DefaultSealMetallic": 0.0,
+    "DefaultSealRoughness": 0.5,
+    "DefaultSealSpecular": 0.5,
+    "bUseImportedStaticMeshes": true
+  },
+  "override_material": "/Game/TransformationVFX/SM2SM/ChineseSeals/M_ChineseSeal_DefaultWhite.M_ChineseSeal_DefaultWhite",
+  "actor": "Chinese_Seal_Pool_Animator",
+  "location": [
+    350.0,
+    0.0,
+    60.0
+  ],
+  "save_current_level": true,
+  "save_dirty_packages": true
+}

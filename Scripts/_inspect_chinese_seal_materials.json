@@ -1,0 +1,38 @@
+{
+  "actor": "Chinese_Seal_Pool_Animator",
+  "override_material": "/Game/TransformationVFX/SM2SM/ChineseSeals/M_ChineseSeal_DefaultWhite.M_ChineseSeal_DefaultWhite",
+  "components": [
+    {
+      "name": "StaticMeshComponent_256",
+      "material_0": "/Game/TransformationVFX/SM2SM/ChineseSeals/M_ChineseSeal_DefaultWhite.M_ChineseSeal_DefaultWhite"
+    },
+    {
+      "name": "StaticMeshComponent_257",
+      "material_0": "/Game/TransformationVFX/SM2SM/ChineseSeals/M_ChineseSeal_DefaultWhite.M_ChineseSeal_DefaultWhite"
+    },
+    {
+      "name": "StaticMeshComponent_258",
+      "material_0": "/Game/TransformationVFX/SM2SM/ChineseSeals/M_ChineseSeal_DefaultWhite.M_ChineseSeal_DefaultWhite"
+    },
+    {
+      "name": "StaticMeshComponent_259",
+      "material_0": "/Game/TransformationVFX/SM2SM/ChineseSeals/M_ChineseSeal_DefaultWhite.M_ChineseSeal_DefaultWhite"
+    },
+    {
+      "name": "StaticMeshComponent_260",
+      "material_0": "/Game/TransformationVFX/SM2SM/ChineseSeals/M_ChineseSeal_DefaultWhite.M_ChineseSeal_DefaultWhite"
+    },
+    {
+      "name": "StaticMeshComponent_261",
+      "material_0": "/Game/TransformationVFX/SM2SM/ChineseSeals/M_ChineseSeal_DefaultWhite.M_ChineseSeal_DefaultWhite"
+    },
+    {
+      "name": "StaticMeshComponent_262",
+      "material_0": "/Game/TransformationVFX/SM2SM/ChineseSeals/M_ChineseSeal_DefaultWhite.M_ChineseSeal_DefaultWhite"
+    },
+    {
+      "name": "StaticMeshComponent_263",
+      "material_0": "/Game/TransformationVFX/SM2SM/ChineseSeals/M_ChineseSeal_DefaultWhite.M_ChineseSeal_DefaultWhite"
+    }
+  ]
+}

@@ -1,0 +1,347 @@
+diff --git a/Source/MCPGameProject/BurstMeshStateSwitcherComponent.cpp b/Source/MCPGameProject/BurstMeshStateSwitcherComponent.cpp
+index 33a819e..57f425f 100644
+--- a/Source/MCPGameProject/BurstMeshStateSwitcherComponent.cpp
++++ b/Source/MCPGameProject/BurstMeshStateSwitcherComponent.cpp
+@@ -2,8 +2,10 @@
+ 
+ #include "Components/BoxComponent.h"
+ #include "Components/InputComponent.h"
++#include "Components/SceneComponent.h"
+ #include "Components/StaticMeshComponent.h"
+ #include "Components/WidgetComponent.h"
++#include "EngineUtils.h"
+ #include "Engine/World.h"
+ #include "GameFramework/Actor.h"
+ #include "GameFramework/PlayerController.h"
+@@ -82,6 +84,7 @@ void UBurstMeshStateSwitcherComponent::BeginPlay()
+ 	}
+ 
+ 	SetRuntimeStateVisibility(CurrentStateIndex);
++	SetDisplayToggleState(true);
+ 	if (TransformationNiagara)
+ 	{
+ 		TransformationNiagara->SetAutoActivate(false);
+@@ -222,6 +225,7 @@ void UBurstMeshStateSwitcherComponent::TickComponent(
+ 
+ 	// 1/2/3 键功能保留；额外用 Leap 挥手做正反向循环切换。
+ 	PollLeapSwipeGestures(DeltaTime);
++	PollLeapFistDisplayToggle(DeltaTime);
+ }
+ 
+ void UBurstMeshStateSwitcherComponent::UpdateModelRotation(float DeltaTime)
+@@ -263,18 +267,22 @@ void UBurstMeshStateSwitcherComponent::OnLeapTrackingData(const FLeapFrameData&
+ 	TimeSinceLeapFrame = 0.0f;
+ 	bLeftHandPresent = false;
+ 	bRightHandPresent = false;
++	LeftGrabStrength = 0.0f;
++	RightGrabStrength = 0.0f;
+ 	for (const FLeapHandData& Hand : Frame.Hands)
+ 	{
+ 		if (Hand.HandType == LEAP_HAND_LEFT)
+ 		{
+ 			bLeftHandPresent = true;
+ 			LeftPalmVelocity = Hand.Palm.Velocity;
++			LeftGrabStrength = Hand.GrabStrength;
+ 			LeftHandConfidence = Hand.Confidence;
+ 		}
+ 		else if (Hand.HandType == LEAP_HAND_RIGHT)
+ 		{
+ 			bRightHandPresent = true;
+ 			RightPalmVelocity = Hand.Palm.Velocity;
++			RightGrabStrength = Hand.GrabStrength;
+ 			RightHandConfidence = Hand.Confidence;
+ 		}
+ 	}
+@@ -333,6 +341,114 @@ void UBurstMeshStateSwitcherComponent::PollLeapSwipeGestures(float DeltaTime)
+ 	}
+ }
+ 
++void UBurstMeshStateSwitcherComponent::PollLeapFistDisplayToggle(float DeltaTime)
++{
++	FistToggleCooldownRemaining = FMath::Max(0.0f, FistToggleCooldownRemaining - DeltaTime);
++
++	if (!bEnableFistDisplayToggle)
++	{
++		return;
++	}
++
++	if (!bLeftHandPresent || LeftGrabStrength <= FistReleaseThreshold)
++	{
++		bLeftFistLatched = false;
++	}
++	if (!bRightHandPresent || RightGrabStrength <= FistReleaseThreshold)
++	{
++		bRightFistLatched = false;
++	}
++
++	if (!IsSingleHandPresent())
++	{
++		return;
++	}
++
++	const bool bUseLeftHand = bLeftHandPresent && !bRightHandPresent;
++	const float GrabStrength = bUseLeftHand ? LeftGrabStrength : RightGrabStrength;
++	const float Confidence = bUseLeftHand ? LeftHandConfidence : RightHandConfidence;
++	bool& bFistLatched = bUseLeftHand ? bLeftFistLatched : bRightFistLatched;
++
++	if (Confidence < MinHandConfidence || FistToggleCooldownRemaining > 0.0f)
++	{
++		return;
++	}
++
++	if (!bFistLatched && GrabStrength >= FistGrabThreshold)
++	{
++		ToggleDisplayActors();
++		bFistLatched = true;
++		FistToggleCooldownRemaining = FistToggleCooldownSeconds;
++	}
++}
++
++bool UBurstMeshStateSwitcherComponent::IsSingleHandPresent() const
++{
++	return bLeftHandPresent != bRightHandPresent;
++}
++
++void UBurstMeshStateSwitcherComponent::ToggleDisplayActors()
++{
++	SetDisplayToggleState(!bSealDisplayVisible);
++}
++
++void UBurstMeshStateSwitcherComponent::SetDisplayToggleState(bool bShowSeal)
++{
++	bSealDisplayVisible = bShowSeal;
++	SetDisplayActorVisible(FindDisplayActorByNameOrLabel(SealActorNameOrLabel), bShowSeal);
++	SetDisplayActorVisible(FindDisplayActorByNameOrLabel(BGActorNameOrLabel), !bShowSeal);
++
++	UE_LOG(LogTemp, Display, TEXT("BurstMeshStateSwitcher: fist display toggle -> %s."),
++		bShowSeal ? TEXT("Chinese_Seal_Pool_Animator") : TEXT("BG"));
++}
++
++AActor* UBurstMeshStateSwitcherComponent::FindDisplayActorByNameOrLabel(FName ActorNameOrLabel) const
++{
++	UWorld* World = GetWorld();
++	if (!World || ActorNameOrLabel.IsNone())
++	{
++		return nullptr;
++	}
++
++	const FString DesiredName = ActorNameOrLabel.ToString();
++	for (TActorIterator<AActor> It(World); It; ++It)
++	{
++		AActor* Actor = *It;
++		if (!Actor || Actor == GetOwner())
++		{
++			continue;
++		}
++
++		if (Actor->GetFName() == ActorNameOrLabel || Actor->ActorHasTag(ActorNameOrLabel)
++			|| Actor->GetActorNameOrLabel() == DesiredName)
++		{
++			return Actor;
++		}
++	}
++
++	return nullptr;
++}
++
++void UBurstMeshStateSwitcherComponent::SetDisplayActorVisible(AActor* Actor, bool bVisible) const
++{
++	if (!Actor)
++	{
++		return;
++	}
++
++	Actor->SetActorHiddenInGame(!bVisible);
++
++	TArray<USceneComponent*> SceneComponents;
++	Actor->GetComponents(SceneComponents);
++	for (USceneComponent* SceneComponent : SceneComponents)
++	{
++		if (SceneComponent)
++		{
++			SceneComponent->SetVisibility(bVisible, true);
++		}
++	}
++}
++
+ bool UBurstMeshStateSwitcherComponent::IsLateralSwipe(const FVector& Velocity) const
+ {
+ 	// 防闪烁之二/三：速度阈值过滤微小抖动；要求水平(左右 Y 轴)分量主导，
+@@ -436,15 +552,16 @@ void UBurstMeshStateSwitcherComponent::CacheOwnerComponents()
+ 	if (TransformationNiagara)
+ 	{
+ 		// 始终使用网格变形系统（P_Morph_5_SM）。MorphParticleSystem 是新属性，BP 实例不会覆盖。
+-		if (!MorphParticleSystem)
++		if (!ParticleSystem)
+ 		{
+-			MorphParticleSystem = LoadObject<UNiagaraSystem>(
+-				nullptr, TEXT("/Game/NiagaraMorphEffect/Niagara/P_Morph_5_SM.P_Morph_5_SM"));
++			ParticleSystem = LoadObject<UNiagaraSystem>(
++				nullptr, TEXT("/Game/TransformationVFX/Niagara/NS_Inhalation_SM.NS_Inhalation_SM"));
+ 		}
+-		if (MorphParticleSystem)
++		UNiagaraSystem* RuntimeParticleSystem = ParticleSystem ? ParticleSystem.Get() : MorphParticleSystem.Get();
++		if (RuntimeParticleSystem)
+ 		{
+ 			TransformationNiagara->SetAutoActivate(false);
+-			TransformationNiagara->SetAsset(MorphParticleSystem);
++			TransformationNiagara->SetAsset(RuntimeParticleSystem);
+ 		}
+ 		NiagaraBaseLocation = TransformationNiagara->GetRelativeLocation();
+ 		NiagaraBaseScale = TransformationNiagara->GetRelativeScale3D();
+@@ -497,19 +614,21 @@ void UBurstMeshStateSwitcherComponent::ApplyParticleSettings()
+ 	}
+ 
+ 	// P_Morph_5_SM 用 User.Static Mesh0 作为源形状、User.Static Mesh1 作为目标形状。
++	const bool bUsingInhalationSystem = ParticleSystem && TransformationNiagara->GetAsset() == ParticleSystem;
+ 	if (SourceMeshComponent)
+ 	{
+-		UNiagaraFunctionLibrary::OverrideSystemUserVariableStaticMeshComponent(
+-			TransformationNiagara, TEXT("User.Static Mesh0"), SourceMeshComponent);
++		UNiagaraFunctionLibrary::OverrideSystemUserVariableStaticMeshComponent(TransformationNiagara,
++			bUsingInhalationSystem ? TEXT("User.Static Mesh A") : TEXT("User.Static Mesh0"), SourceMeshComponent);
+ 	}
+ 	if (TargetMeshComponent)
+ 	{
+-		UNiagaraFunctionLibrary::OverrideSystemUserVariableStaticMeshComponent(
+-			TransformationNiagara, TEXT("User.Static Mesh1"), TargetMeshComponent);
++		UNiagaraFunctionLibrary::OverrideSystemUserVariableStaticMeshComponent(TransformationNiagara,
++			bUsingInhalationSystem ? TEXT("User.Static Mesh B") : TEXT("User.Static Mesh1"), TargetMeshComponent);
+ 	}
+ 	TransformationNiagara->SetRelativeLocation(NiagaraBaseLocation + ParticleLocationOffset);
+ 	TransformationNiagara->SetRelativeRotation(NiagaraBaseRotation + ParticleRotationOffset);
+-	TransformationNiagara->SetRelativeScale3D(NiagaraBaseScale * ParticleNonUniformScale);
++	const float RuntimeParticleScale = ParticleEffectScale * (bUsingInhalationSystem ? InhalationSpreadScale : 1.0f);
++	TransformationNiagara->SetRelativeScale3D(NiagaraBaseScale * ParticleNonUniformScale * RuntimeParticleScale);
+ 	// 去掉 Spring 力（保留 Noise）：让粒子涡流向外消散而非弹回目标。
+ 	TransformationNiagara->SetVariableFloat(TEXT("User.Spring Force"), 0.0f);
+ 	// 粒子颜色 = 目标模型玉石材质：把目标状态的玉石材质设到 User.ParticleMaterial，
+@@ -517,6 +636,8 @@ void UBurstMeshStateSwitcherComponent::ApplyParticleSettings()
+ 	const int32 TargetStateIdx = (PendingStateIndex != INDEX_NONE) ? PendingStateIndex : CurrentStateIndex;
+ 	if (StateFadeMaterials.IsValidIndex(TargetStateIdx) && StateFadeMaterials[TargetStateIdx])
+ 	{
++		TransformationNiagara->SetVariableMaterial(
++			TEXT("User.Particle Material"), StateFadeMaterials[TargetStateIdx]);
+ 		TransformationNiagara->SetVariableMaterial(
+ 			TEXT("User.ParticleMaterial"), StateFadeMaterials[TargetStateIdx]);
+ 	}
+@@ -628,14 +749,21 @@ void UBurstMeshStateSwitcherComponent::SwitchToState(int32 StateIndex)
+ 		CurrentStateIndex + 1, PendingStateIndex + 1);
+ 	TargetMeshComponent->EmptyOverrideMaterials();
+ 
+-	if (MorphParticleSystem && TransformationNiagara->GetAsset() != MorphParticleSystem)
++	if (!ParticleSystem)
+ 	{
+-		TransformationNiagara->SetAsset(MorphParticleSystem);
++		ParticleSystem = LoadObject<UNiagaraSystem>(
++			nullptr, TEXT("/Game/TransformationVFX/Niagara/NS_Inhalation_SM.NS_Inhalation_SM"));
++	}
++	UNiagaraSystem* RuntimeParticleSystem = ParticleSystem ? ParticleSystem.Get() : MorphParticleSystem.Get();
++	if (RuntimeParticleSystem && TransformationNiagara->GetAsset() != RuntimeParticleSystem)
++	{
++		TransformationNiagara->SetAsset(RuntimeParticleSystem);
+ 	}
+ 	// 先设源/目标网格再重置系统，重置后再设一次，确保数据接口在重新初始化后拿到正确的网格。
+ 	ApplyParticleSettings();
+ 	TransformationNiagara->ReinitializeSystem();
+ 	ApplyParticleSettings();
++	TransformationNiagara->SetHiddenInGame(false, true);
+ 	TransformationNiagara->SetVisibility(true, true);
+ 	TransformationNiagara->Activate(true);
+ 
+@@ -644,6 +772,14 @@ void UBurstMeshStateSwitcherComponent::SwitchToState(int32 StateIndex)
+ 		const float EffectiveDuration = FMath::Max(FrontHalfDuration, 0.1f);
+ 		// 变形系统自带粒子运动，不需要逐帧驱动 Transformation Alpha。
+ 		bTransitionActive = false;
++		const bool bDriveTransformationAlpha = ParticleSystem && RuntimeParticleSystem == ParticleSystem;
++		TransitionElapsed = 0.0f;
++		ActiveTransitionDuration = EffectiveDuration;
++		bTransitionActive = bDriveTransformationAlpha;
++		if (bDriveTransformationAlpha)
++		{
++			SetTransformationAlpha(InitialTransformationAlpha);
++		}
+ 		World->GetTimerManager().SetTimer(
+ 			HideSourceTimer, this, &UBurstMeshStateSwitcherComponent::BeginSourceFadeOut, SourceHideDelay, false);
+ 		World->GetTimerManager().SetTimer(
+@@ -803,6 +939,7 @@ void UBurstMeshStateSwitcherComponent::StopAndHideParticles()
+ 		// 用 Deactivate（停止生成、保留已存在粒子自然消散）而不是 DeactivateImmediate（瞬间清空），
+ 		// 保持柔和淡出的观感。
+ 		TransformationNiagara->Deactivate();
++		TransformationNiagara->SetHiddenInGame(true, true);
+ 		TransformationNiagara->SetVisibility(false, true);
+ 	}
+ 	bParticleFadeOutActive = false;
+diff --git a/Source/MCPGameProject/BurstMeshStateSwitcherComponent.h b/Source/MCPGameProject/BurstMeshStateSwitcherComponent.h
+index 381eaaa..1d8d2c1 100644
+--- a/Source/MCPGameProject/BurstMeshStateSwitcherComponent.h
++++ b/Source/MCPGameProject/BurstMeshStateSwitcherComponent.h
+@@ -6,6 +6,7 @@
+ 
+ class UNiagaraComponent;
+ class UNiagaraSystem;
++class AActor;
+ class APlayerController;
+ class UMaterialInstanceDynamic;
+ class UMaterialInterface;
+@@ -158,6 +159,24 @@ public:
+ 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Rotation")
+ 	bool bEnableModelRotation = true;
+ 
++	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Fist Display Toggle")
++	bool bEnableFistDisplayToggle = true;
++
++	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Fist Display Toggle")
++	FName BGActorNameOrLabel = TEXT("BG");
++
++	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Fist Display Toggle")
++	FName SealActorNameOrLabel = TEXT("Chinese_Seal_Pool_Animator");
++
++	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Fist Display Toggle", meta=(ClampMin="0.0", ClampMax="1.0"))
++	float FistGrabThreshold = 0.82f;
++
++	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Fist Display Toggle", meta=(ClampMin="0.0", ClampMax="1.0"))
++	float FistReleaseThreshold = 0.45f;
++
++	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Fist Display Toggle", meta=(ClampMin="0.0"))
++	float FistToggleCooldownSeconds = 0.7f;
++
+ 	// 自转速度（度/秒）。正值逆时针、负值顺时针；0 等同关闭。
+ 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Burst Switcher|Rotation")
+ 	float RotationSpeedDegreesPerSecond = 30.0f;
+@@ -196,8 +215,14 @@ private:
+ 	void SwitchToStateTwo();
+ 	void SwitchToStateThree();
+ 	void PollLeapSwipeGestures(float DeltaTime);
++	void PollLeapFistDisplayToggle(float DeltaTime);
+ 	void UpdateModelRotation(float DeltaTime);
+ 	bool IsTransitionInProgress() const;
++	bool IsSingleHandPresent() const;
++	void SetDisplayToggleState(bool bShowSeal);
++	void ToggleDisplayActors();
++	AActor* FindDisplayActorByNameOrLabel(FName ActorNameOrLabel) const;
++	void SetDisplayActorVisible(AActor* Actor, bool bVisible) const;
+ 	// 判定掌心速度是否构成一次有效的水平挥手（阈值 + 水平分量主导）。
+ 	bool IsLateralSwipe(const FVector& Velocity) const;
+ 	// Leap 帧回调（游戏线程）：仅缓存左右手掌心速度/置信度，实际判定放在 Tick 中按 DeltaTime 走冷却。
+@@ -250,14 +275,20 @@ private:
+ 	// 每手挥手冷却剩余时间（秒），左右手独立计时。
+ 	float LeftHandSwipeCooldown = 0.0f;
+ 	float RightHandSwipeCooldown = 0.0f;
++	float FistToggleCooldownRemaining = 0.0f;
+ 
+ 	// Leap 帧回调缓存的最新手部数据（游戏线程写入，Tick 读取）。
+ 	FVector LeftPalmVelocity = FVector::ZeroVector;
+ 	FVector RightPalmVelocity = FVector::ZeroVector;
++	float LeftGrabStrength = 0.0f;
++	float RightGrabStrength = 0.0f;
+ 	float LeftHandConfidence = 0.0f;
+ 	float RightHandConfidence = 0.0f;
+ 	bool bLeftHandPresent = false;
+ 	bool bRightHandPresent = false;
++	bool bLeftFistLatched = false;
++	bool bRightFistLatched = false;
++	bool bSealDisplayVisible = true;
+ 	float TimeSinceLeapFrame = 1000.0f;
+ 	FDelegateHandle LeapFrameDelegateHandle;
+ };
